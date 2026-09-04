@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../auth/login_screen.dart';
 import '../patients/patients_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -143,19 +144,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     item: item,
                     selected: selected,
                     onTap: () {
-  if (index == 1) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const PatientsScreen(),
-      ),
-    );
-    return;
-  }
+                      if (index == 1) {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (context) => const PatientsScreen(),
+                          ),
+                        );
+                        return;
+                      }
 
-  setState(() {
-    _selectedIndex = index;
-  });
-},
+                      setState(() {
+                        _selectedIndex = index;
+                      });
+                    },
                   ),
                 );
               },
@@ -217,7 +218,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 IconButton(
                   tooltip: 'Déconnexion',
                   onPressed: () {
-                    Navigator.of(context).pop();
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(
+                        builder: (context) => const LoginScreen(),
+                      ),
+                      (route) => false,
+                    );
                   },
                   icon: const Icon(
                     Icons.logout_outlined,

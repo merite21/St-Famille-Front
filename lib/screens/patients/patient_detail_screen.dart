@@ -30,6 +30,8 @@ class PatientDetailScreen extends StatelessWidget {
                   const SizedBox(height: 24),
                   _buildInformationSection(),
                   const SizedBox(height: 20),
+                  _buildContactSection(),
+                  const SizedBox(height: 20),
                   _buildMedicalSection(),
                   const SizedBox(height: 20),
                   _buildHistorySection(),
@@ -144,7 +146,7 @@ class PatientDetailScreen extends StatelessWidget {
             backgroundColor:
                 AppTheme.primaryColor.withValues(alpha: 0.10),
             child: Text(
-              patient.prenom.substring(0, 1).toUpperCase(),
+              _initial(patient.prenom),
               style: const TextStyle(
                 fontSize: 25,
                 fontWeight: FontWeight.w700,
@@ -193,6 +195,11 @@ class PatientDetailScreen extends StatelessWidget {
     );
   }
 
+  String _initial(String value) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? '?' : trimmed.substring(0, 1).toUpperCase();
+  }
+
   Widget _buildSmallInfo(IconData icon, String text) {
     return Row(
       children: [
@@ -214,24 +221,37 @@ class PatientDetailScreen extends StatelessWidget {
   }
 
   Widget _buildStatusBadge(String status) {
+    final color = _statusColor(status);
+
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: 13,
         vertical: 7,
       ),
       decoration: BoxDecoration(
-        color: const Color(0xFFDCFCE7),
+        color: color.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(
         status,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w700,
-          color: Color(0xFF15803D),
+          color: color,
         ),
       ),
     );
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'Nouveau':
+        return AppTheme.primaryColor;
+      case 'Inactif':
+        return const Color(0xFF94A3B8);
+      default:
+        return const Color(0xFF15803D);
+    }
   }
 
   Widget _buildInformationSection() {
@@ -280,26 +300,75 @@ class PatientDetailScreen extends StatelessWidget {
               Expanded(
                 child: _buildInfoItem(
                   'Date de naissance',
-                  'À renseigner',
+                  patient.dateNaissance == null
+                      ? 'À renseigner'
+                      : _formatDate(patient.dateNaissance!),
                 ),
               ),
-              
-     Expanded(
-  child: _buildInfoItem(
+              Expanded(
+                child: _buildInfoItem(
                   'Adresse',
-                  'À renseigner',
+                  patient.adresse ?? 'À renseigner',
                 ),
               ),
-             Expanded(
-  child: _buildInfoItem(
-    'N° dossier',
-    patient.id,
-  ),
-),
+              Expanded(
+                child: _buildInfoItem(
+                  'N° dossier',
+                  patient.id,
+                ),
+              ),
             ],
           ),
         ],
       ),
+    );
+  }
+
+  String _formatDate(DateTime date) {
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+
+    return '$day/$month/${date.year}';
+  }
+
+  Widget _buildContactSection() {
+    final hasContact = patient.contactNom != null ||
+        patient.contactTelephone != null;
+
+    return _buildSectionCard(
+      title: 'Personne à contacter',
+      icon: Icons.contact_phone_outlined,
+      child: hasContact
+          ? Row(
+              children: [
+                Expanded(
+                  child: _buildInfoItem(
+                    'Nom du contact',
+                    patient.contactNom ?? 'À renseigner',
+                  ),
+                ),
+                Expanded(
+                  child: _buildInfoItem(
+                    'Téléphone du contact',
+                    patient.contactTelephone ?? 'À renseigner',
+                  ),
+                ),
+                Expanded(
+                  child: _buildInfoItem(
+                    'Lien avec le patient',
+                    patient.lienContact ?? 'À renseigner',
+                  ),
+                ),
+                const Expanded(child: SizedBox.shrink()),
+              ],
+            )
+          : const Text(
+              'Aucune personne à contacter renseignée.',
+              style: TextStyle(
+                fontSize: 13,
+                color: Color(0xFF64748B),
+              ),
+            ),
     );
   }
 
