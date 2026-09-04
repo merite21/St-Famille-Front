@@ -24,15 +24,19 @@ class ApiClient {
   bool get isAuthenticated => _token != null;
 
   Uri _uri(String path, [Map<String, dynamic>? query]) {
-    final cleanedQuery = query == null
-        ? null
-        : query.map((key, value) => MapEntry(key, value?.toString()))
-          ..removeWhere((key, value) => value == null);
+    Map<String, String>? cleanedQuery;
+    if (query != null) {
+      cleanedQuery = <String, String>{};
+      for (final entry in query.entries) {
+        final value = entry.value?.toString();
+        if (value != null) cleanedQuery[entry.key] = value;
+      }
+    }
 
     return Uri.parse('${ApiConfig.baseUrl}$path').replace(
       queryParameters: (cleanedQuery == null || cleanedQuery.isEmpty)
           ? null
-          : cleanedQuery.cast<String, String>(),
+          : cleanedQuery,
     );
   }
 
