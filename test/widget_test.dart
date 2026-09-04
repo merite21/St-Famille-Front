@@ -21,7 +21,7 @@ void main() {
     await tester.tap(find.text('Se connecter'));
     await tester.pump();
 
-    expect(find.text('Veuillez saisir votre identifiant'), findsOneWidget);
+    expect(find.text('Veuillez saisir votre matricule'), findsOneWidget);
     expect(find.text('Veuillez saisir votre mot de passe'), findsOneWidget);
   });
 }

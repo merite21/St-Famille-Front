@@ -1,11 +1,17 @@
 import 'package:flutter/material.dart';
 
-import '../../data/patient_directory.dart';
-import '../../models/patient.dart';
-import '../../models/rendez_vous.dart';
+import '../../models/garde.dart';
+import '../../models/planning_entry.dart';
+import '../../models/utilisateur.dart';
+import '../../services/api_exception.dart';
+import '../../services/garde_service.dart';
+import '../../services/planning_service.dart';
+import '../../services/user_service.dart';
 import '../../widgets/module_header.dart';
 import '../../widgets/stat_card.dart';
 import '../../widgets/status_pill.dart';
+
+const List<String> _typesGarde = ['jour', 'nuit', '24h'];
 
 class PlanningScreen extends StatefulWidget {
   const PlanningScreen({super.key});
@@ -15,31 +21,72 @@ class PlanningScreen extends StatefulWidget {
 }
 
 class _PlanningScreenState extends State<PlanningScreen> {
-  final List<RendezVous> _rendezVous = [];
+  List<PlanningEntry> _plannings = [];
+  List<Garde> _gardes = [];
+  List<Utilisateur> _users = [];
+  bool _loading = true;
+  String? _error;
 
-  Future<void> _openCreateDialog() async {
-    final created = await showDialog<RendezVous>(
-      context: context,
-      builder: (context) => const _RendezVousDialog(),
-    );
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
 
-    if (created != null && mounted) {
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final results = await Future.wait([
+        PlanningService.instance.list(),
+        GardeService.instance.list(),
+        UserService.instance.list(),
+      ]);
+
+      if (!mounted) return;
+
       setState(() {
-        _rendezVous.insert(0, created);
-        _rendezVous.sort((a, b) => a.dateHeure.compareTo(b.dateHeure));
+        _plannings = results[0] as List<PlanningEntry>;
+        _gardes = results[1] as List<Garde>;
+        _users = results[2] as List<Utilisateur>;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
       });
     }
+  }
+
+  Future<void> _openCreatePlanningDialog() async {
+    final created = await showDialog<bool>(
+      context: context,
+      builder: (context) => _PlanningDialog(users: _users),
+    );
+    if (created == true) _load();
+  }
+
+  Future<void> _openCreateGardeDialog() async {
+    final created = await showDialog<bool>(
+      context: context,
+      builder: (context) => _GardeDialog(users: _users),
+    );
+    if (created == true) _load();
   }
 
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final aujourdHui = _rendezVous.where((r) {
-      return r.dateHeure.year == now.year &&
-          r.dateHeure.month == now.month &&
-          r.dateHeure.day == now.day;
+    final gardesAujourdHui = _gardes.where((g) {
+      return g.dateGarde.year == now.year &&
+          g.dateGarde.month == now.month &&
+          g.dateGarde.day == now.day;
     }).length;
-    final confirmes = _rendezVous.where((r) => r.statut == 'Confirmé').length;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -47,89 +94,80 @@ class _PlanningScreenState extends State<PlanningScreen> {
         children: [
           const ModuleHeader(title: 'Planning'),
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(28),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Expanded(
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? _buildErrorState()
+                    : SingleChildScrollView(
+                        padding: const EdgeInsets.all(28),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(
-                              'Planning des rendez-vous',
+                            const Text(
+                              'Planning du personnel',
                               style: TextStyle(
                                 fontSize: 25,
                                 fontWeight: FontWeight.w700,
                                 color: Color(0xFF1E293B),
                               ),
                             ),
-                            SizedBox(height: 6),
-                            Text(
-                              'Planifiez les rendez-vous des patients avec les médecins.',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Color(0xFF64748B),
-                              ),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Plannings de service et gardes du personnel médical et infirmier.',
+                              style: TextStyle(fontSize: 14, color: Color(0xFF64748B)),
                             ),
+                            const SizedBox(height: 24),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: StatCard(
+                                    title: 'Plannings',
+                                    value: '${_plannings.length}',
+                                    icon: Icons.calendar_month_outlined,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: StatCard(
+                                    title: 'Gardes aujourd’hui',
+                                    value: '$gardesAujourdHui',
+                                    icon: Icons.nights_stay_outlined,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 24),
+                            _buildPlanningsCard(),
+                            const SizedBox(height: 24),
+                            _buildGardesCard(),
                           ],
                         ),
                       ),
-                      ElevatedButton.icon(
-                        onPressed: _openCreateDialog,
-                        icon: const Icon(Icons.add),
-                        label: const Text('Nouveau rendez-vous'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 14,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: StatCard(
-                          title: 'Aujourd’hui',
-                          value: '$aujourdHui',
-                          icon: Icons.today_outlined,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: StatCard(
-                          title: 'Confirmés',
-                          value: '$confirmes',
-                          icon: Icons.event_available_outlined,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: StatCard(
-                          title: 'Total planifiés',
-                          value: '${_rendezVous.length}',
-                          icon: Icons.calendar_month_outlined,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                  _buildList(),
-                ],
-              ),
-            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildList() {
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(30),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 40, color: Color(0xFFDC2626)),
+            const SizedBox(height: 12),
+            Text(_error!, textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            ElevatedButton(onPressed: _load, child: const Text('Réessayer')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPlanningsCard() {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -141,320 +179,411 @@ class _PlanningScreenState extends State<PlanningScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Rendez-vous planifiés',
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF1E293B),
-            ),
-          ),
-          const SizedBox(height: 16),
-          if (_rendezVous.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 30),
-              child: Center(
-                child: Text(
-                  'Aucun rendez-vous planifié pour le moment.',
-                  style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
-                ),
-              ),
-            )
-          else
-            ..._rendezVous.map(_buildRow),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildRow(RendezVous rendezVous) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFFF1F5F9))),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            flex: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${rendezVous.patient.nom} ${rendezVous.patient.prenom}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  rendezVous.motif,
-                  style: const TextStyle(
-                    color: Color(0xFF94A3B8),
-                    fontSize: 11,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: Text(
-              rendezVous.medecin,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              _formatDateTime(rendezVous.dateHeure),
-              style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-            ),
-          ),
-          StatusPill(
-            label: rendezVous.statut,
-            color: statusColor(rendezVous.statut),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatDateTime(DateTime date) {
-    final day = date.day.toString().padLeft(2, '0');
-    final month = date.month.toString().padLeft(2, '0');
-    final hour = date.hour.toString().padLeft(2, '0');
-    final minute = date.minute.toString().padLeft(2, '0');
-    return '$day/$month/${date.year} à $hour:$minute';
-  }
-}
-
-class _RendezVousDialog extends StatefulWidget {
-  const _RendezVousDialog();
-
-  @override
-  State<_RendezVousDialog> createState() => _RendezVousDialogState();
-}
-
-class _RendezVousDialogState extends State<_RendezVousDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _medecinController = TextEditingController();
-  final _motifController = TextEditingController();
-
-  Patient? _patient;
-  DateTime? _dateHeure;
-  bool _isSaving = false;
-
-  @override
-  void dispose() {
-    _medecinController.dispose();
-    _motifController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pickDateTime() async {
-    final now = DateTime.now();
-
-    final date = await showDatePicker(
-      context: context,
-      initialDate: now,
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 365)),
-      helpText: 'Sélectionner la date',
-      cancelText: 'Annuler',
-      confirmText: 'Valider',
-    );
-
-    if (date == null || !mounted) return;
-
-    final time = await showTimePicker(
-      context: context,
-      initialTime: TimeOfDay.now(),
-      helpText: 'Sélectionner l’heure',
-      cancelText: 'Annuler',
-      confirmText: 'Valider',
-    );
-
-    if (time == null) return;
-
-    setState(() {
-      _dateHeure = DateTime(
-        date.year,
-        date.month,
-        date.day,
-        time.hour,
-        time.minute,
-      );
-    });
-  }
-
-  String _formatDateTime(DateTime date) {
-    final day = date.day.toString().padLeft(2, '0');
-    final month = date.month.toString().padLeft(2, '0');
-    final hour = date.hour.toString().padLeft(2, '0');
-    final minute = date.minute.toString().padLeft(2, '0');
-    return '$day/$month/${date.year} à $hour:$minute';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final patients = PatientDirectory.all;
-
-    return AlertDialog(
-      title: const Text('Nouveau rendez-vous'),
-      content: SizedBox(
-        width: 420,
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Row(
             children: [
               const Text(
-                'Patient',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                'Plannings de service',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF1E293B)),
               ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<Patient>(
-                value: _patient,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  hintText: 'Sélectionner un patient',
-                  prefixIcon: Icon(Icons.person_outline),
-                ),
-                items: patients
-                    .map(
-                      (patient) => DropdownMenuItem(
-                        value: patient,
-                        child: Text(
-                          '${patient.nom} ${patient.prenom} (${patient.id})',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) => setState(() => _patient = value),
-                validator: (value) =>
-                    value == null ? 'Veuillez sélectionner un patient' : null,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Médecin',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _medecinController,
-                decoration: const InputDecoration(
-                  hintText: 'Ex. Dr. Fatou Kone',
-                  prefixIcon: Icon(Icons.badge_outlined),
-                ),
-                validator: (value) => (value == null || value.trim().isEmpty)
-                    ? 'Ce champ est obligatoire'
-                    : null,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Motif',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _motifController,
-                decoration: const InputDecoration(
-                  hintText: 'Ex. Suivi post-consultation',
-                  prefixIcon: Icon(Icons.description_outlined),
-                ),
-                validator: (value) => (value == null || value.trim().isEmpty)
-                    ? 'Ce champ est obligatoire'
-                    : null,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Date et heure',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              InkWell(
-                onTap: _pickDateTime,
-                borderRadius: BorderRadius.circular(10),
-                child: InputDecorator(
-                  decoration: const InputDecoration(
-                    hintText: 'JJ/MM/AAAA à HH:MM',
-                    prefixIcon: Icon(Icons.event_outlined),
-                  ),
-                  child: Text(
-                    _dateHeure == null
-                        ? 'Sélectionner une date et une heure'
-                        : _formatDateTime(_dateHeure!),
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: _dateHeure == null
-                          ? const Color(0xFF94A3B8)
-                          : const Color(0xFF334155),
-                    ),
-                  ),
-                ),
+              const Spacer(),
+              ElevatedButton.icon(
+                onPressed: _openCreatePlanningDialog,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Nouveau'),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 16),
+          if (_plannings.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Aucun planning enregistré.',
+                style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+              ),
+            )
+          else
+            ..._plannings.map(
+              (p) => Container(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Color(0xFFF1F5F9))),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            p.userNom ?? 'Utilisateur #${p.userId}',
+                            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            p.service ?? 'Service non renseigné',
+                            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        '${_formatDateTime(p.dateDebut)} → ${_formatDateTime(p.dateFin)}',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
-      actions: [
-        TextButton(
-          onPressed: _isSaving ? null : () => Navigator.pop(context),
-          child: const Text('Annuler'),
-        ),
-        ElevatedButton(
-          onPressed: _isSaving ? null : _save,
-          child: _isSaving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Text('Enregistrer'),
-        ),
-      ],
     );
   }
 
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+  Widget _buildGardesCard() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text(
+                'Gardes',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: Color(0xFF1E293B)),
+              ),
+              const Spacer(),
+              ElevatedButton.icon(
+                onPressed: _openCreateGardeDialog,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Nouvelle'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (_gardes.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Aucune garde enregistrée.',
+                style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+              ),
+            )
+          else
+            ..._gardes.map(
+              (g) => Container(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Color(0xFFF1F5F9))),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: Text(
+                        g.userNom ?? 'Utilisateur #${g.userId}',
+                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                      ),
+                    ),
+                    Expanded(
+                      child: Text(
+                        '${_formatDate(g.dateGarde)} — ${g.typeGarde}',
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                      ),
+                    ),
+                    StatusPill(label: statusLabel(g.statut), color: statusColor(g.statut)),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
-    if (_dateHeure == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Veuillez sélectionner une date et une heure.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+  String _formatDate(DateTime date) {
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    return '$day/$month/${date.year}';
+  }
+
+  String _formatDateTime(DateTime date) {
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
+    return '$day/$month $hour:$minute';
+  }
+}
+
+class _PlanningDialog extends StatefulWidget {
+  final List<Utilisateur> users;
+
+  const _PlanningDialog({required this.users});
+
+  @override
+  State<_PlanningDialog> createState() => _PlanningDialogState();
+}
+
+class _PlanningDialogState extends State<_PlanningDialog> {
+  final _serviceController = TextEditingController();
+  Utilisateur? _user;
+  DateTime? _dateDebut;
+  DateTime? _dateFin;
+  bool _isSaving = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _serviceController.dispose();
+    super.dispose();
+  }
+
+  Future<DateTime?> _pickDateTime(DateTime? initial) async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: initial ?? now,
+      firstDate: now.subtract(const Duration(days: 1)),
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (date == null || !mounted) return null;
+
+    final time = await showTimePicker(
+      context: context,
+      initialTime: initial != null ? TimeOfDay.fromDateTime(initial) : TimeOfDay.now(),
+    );
+    if (time == null) return null;
+
+    return DateTime(date.year, date.month, date.day, time.hour, time.minute);
+  }
+
+  String _formatDateTime(DateTime date) {
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    final hour = date.hour.toString().padLeft(2, '0');
+    final minute = date.minute.toString().padLeft(2, '0');
+    return '$day/$month/${date.year} $hour:$minute';
+  }
+
+  Future<void> _save() async {
+    if (_user == null || _dateDebut == null || _dateFin == null) {
+      setState(() => _error = 'Veuillez renseigner tous les champs.');
       return;
     }
 
     setState(() {
       _isSaving = true;
+      _error = null;
     });
 
-    // Simulation temporaire.
-    // Cette partie sera remplacée par l'appel à l'API REST PHP.
-    await Future.delayed(const Duration(milliseconds: 600));
+    try {
+      await PlanningService.instance.create(
+        userId: _user!.id,
+        dateDebut: _dateDebut!,
+        dateFin: _dateFin!,
+        service: _serviceController.text.trim(),
+      );
+      if (context.mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      setState(() {
+        _isSaving = false;
+        _error = e.message;
+      });
+    }
+  }
 
-    final rendezVous = RendezVous(
-      id: 'RDV-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
-      patient: _patient!,
-      medecin: _medecinController.text.trim(),
-      motif: _motifController.text.trim(),
-      dateHeure: _dateHeure!,
-      statut: 'Confirmé',
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Nouveau planning'),
+      content: SizedBox(
+        width: 400,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_error != null) ...[
+              Text(_error!, style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
+              const SizedBox(height: 8),
+            ],
+            DropdownButtonFormField<Utilisateur>(
+              value: _user,
+              isExpanded: true,
+              decoration: const InputDecoration(hintText: 'Membre du personnel'),
+              items: widget.users
+                  .map((u) => DropdownMenuItem(value: u, child: Text(u.nomComplet)))
+                  .toList(),
+              onChanged: (value) => setState(() => _user = value),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _serviceController,
+              decoration: const InputDecoration(labelText: 'Service (optionnel)'),
+            ),
+            const SizedBox(height: 12),
+            InkWell(
+              onTap: () async {
+                final picked = await _pickDateTime(_dateDebut);
+                if (picked != null) setState(() => _dateDebut = picked);
+              },
+              child: InputDecorator(
+                decoration: const InputDecoration(labelText: 'Début'),
+                child: Text(_dateDebut == null ? 'Sélectionner' : _formatDateTime(_dateDebut!)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            InkWell(
+              onTap: () async {
+                final picked = await _pickDateTime(_dateFin);
+                if (picked != null) setState(() => _dateFin = picked);
+              },
+              child: InputDecorator(
+                decoration: const InputDecoration(labelText: 'Fin'),
+                child: Text(_dateFin == null ? 'Sélectionner' : _formatDateTime(_dateFin!)),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving ? null : () => Navigator.pop(context, false),
+          child: const Text('Annuler'),
+        ),
+        ElevatedButton(
+          onPressed: _isSaving ? null : _save,
+          child: _isSaving
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Enregistrer'),
+        ),
+      ],
     );
+  }
+}
 
-    if (!mounted) return;
+class _GardeDialog extends StatefulWidget {
+  final List<Utilisateur> users;
 
-    Navigator.pop(context, rendezVous);
+  const _GardeDialog({required this.users});
+
+  @override
+  State<_GardeDialog> createState() => _GardeDialogState();
+}
+
+class _GardeDialogState extends State<_GardeDialog> {
+  Utilisateur? _user;
+  DateTime? _date;
+  String _typeGarde = 'jour';
+  bool _isSaving = false;
+  String? _error;
+
+  String _formatDate(DateTime date) {
+    final day = date.day.toString().padLeft(2, '0');
+    final month = date.month.toString().padLeft(2, '0');
+    return '$day/$month/${date.year}';
+  }
+
+  Future<void> _save() async {
+    if (_user == null || _date == null) {
+      setState(() => _error = 'Veuillez renseigner tous les champs.');
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+      _error = null;
+    });
+
+    try {
+      await GardeService.instance.create(
+        userId: _user!.id,
+        dateGarde: _date!,
+        typeGarde: _typeGarde,
+      );
+      if (context.mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      setState(() {
+        _isSaving = false;
+        _error = e.message;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Nouvelle garde'),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (_error != null) ...[
+              Text(_error!, style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
+              const SizedBox(height: 8),
+            ],
+            DropdownButtonFormField<Utilisateur>(
+              value: _user,
+              isExpanded: true,
+              decoration: const InputDecoration(hintText: 'Membre du personnel'),
+              items: widget.users
+                  .map((u) => DropdownMenuItem(value: u, child: Text(u.nomComplet)))
+                  .toList(),
+              onChanged: (value) => setState(() => _user = value),
+            ),
+            const SizedBox(height: 12),
+            InkWell(
+              onTap: () async {
+                final now = DateTime.now();
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _date ?? now,
+                  firstDate: now.subtract(const Duration(days: 1)),
+                  lastDate: now.add(const Duration(days: 365)),
+                );
+                if (picked != null) setState(() => _date = picked);
+              },
+              child: InputDecorator(
+                decoration: const InputDecoration(labelText: 'Date de garde'),
+                child: Text(_date == null ? 'Sélectionner' : _formatDate(_date!)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              value: _typeGarde,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'Type de garde'),
+              items: _typesGarde
+                  .map((t) => DropdownMenuItem(value: t, child: Text(t)))
+                  .toList(),
+              onChanged: (value) => setState(() => _typeGarde = value!),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isSaving ? null : () => Navigator.pop(context, false),
+          child: const Text('Annuler'),
+        ),
+        ElevatedButton(
+          onPressed: _isSaving ? null : _save,
+          child: _isSaving
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Enregistrer'),
+        ),
+      ],
+    );
   }
 }

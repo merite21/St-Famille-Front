@@ -1,19 +1,39 @@
-import 'patient.dart';
+import '../services/json_helpers.dart';
 
 class Consultation {
-  final String id;
-  final Patient patient;
-  final String medecin;
-  final String motif;
-  final DateTime dateHeure;
-  final String statut;
+  final int id;
+  final int dossierId;
+  final int medecinId;
+  final String? motif;
+  final String? observations;
+  final String? diagnostic;
+  final String orientation; // sans_soins, avec_soins, autre
+  final DateTime debutAt;
+  final DateTime? finAt;
 
   const Consultation({
     required this.id,
-    required this.patient,
-    required this.medecin,
-    required this.motif,
-    required this.dateHeure,
-    required this.statut,
+    required this.dossierId,
+    required this.medecinId,
+    required this.orientation,
+    required this.debutAt,
+    this.motif,
+    this.observations,
+    this.diagnostic,
+    this.finAt,
   });
+
+  factory Consultation.fromJson(Map<String, dynamic> json) {
+    return Consultation(
+      id: parseApiInt(json['id'])!,
+      dossierId: parseApiInt(json['dossier_id'])!,
+      medecinId: parseApiInt(json['medecin_id'])!,
+      motif: json['motif'] as String?,
+      observations: json['observations'] as String?,
+      diagnostic: json['diagnostic'] as String?,
+      orientation: json['orientation'] as String,
+      debutAt: parseApiDate(json['debut_at'])!,
+      finAt: parseApiDate(json['fin_at']),
+    );
+  }
 }

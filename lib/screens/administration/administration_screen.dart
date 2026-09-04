@@ -1,17 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../../models/role.dart';
 import '../../models/utilisateur.dart';
+import '../../services/api_exception.dart';
+import '../../services/role_service.dart';
+import '../../services/user_service.dart';
 import '../../widgets/module_header.dart';
 import '../../widgets/stat_card.dart';
 import '../../widgets/status_pill.dart';
-
-const List<String> _roles = [
-  'Médecin',
-  'Infirmier(ère)',
-  'Réceptionniste',
-  'Comptable',
-  'Administrateur',
-];
 
 class AdministrationScreen extends StatefulWidget {
   const AdministrationScreen({super.key});
@@ -21,52 +17,67 @@ class AdministrationScreen extends StatefulWidget {
 }
 
 class _AdministrationScreenState extends State<AdministrationScreen> {
-  final List<Utilisateur> _utilisateurs = [
-    const Utilisateur(
-      id: 'USR-0001',
-      nom: 'ABIALA',
-      prenom: 'Marcelline',
-      role: 'Administrateur',
-      email: 'm.abiala@saintefamille.bj',
-      telephone: '97 11 22 33',
-      statut: 'Actif',
-    ),
-    const Utilisateur(
-      id: 'USR-0002',
-      nom: 'KONE',
-      prenom: 'Fatou',
-      role: 'Médecin',
-      email: 'f.kone@saintefamille.bj',
-      telephone: '96 22 33 44',
-      statut: 'Actif',
-    ),
-    const Utilisateur(
-      id: 'USR-0003',
-      nom: 'DOSSOU',
-      prenom: 'Chantal',
-      role: 'Infirmier(ère)',
-      email: 'c.dossou@saintefamille.bj',
-      telephone: '95 33 44 55',
-      statut: 'Actif',
-    ),
-  ];
+  List<Utilisateur> _users = [];
+  List<Role> _roles = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final results = await Future.wait([
+        UserService.instance.list(),
+        RoleService.instance.list(),
+      ]);
+
+      if (!mounted) return;
+
+      setState(() {
+        _users = results[0] as List<Utilisateur>;
+        _roles = results[1] as List<Role>;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
 
   Future<void> _openCreateDialog() async {
-    final created = await showDialog<Utilisateur>(
+    final created = await showDialog<bool>(
       context: context,
-      builder: (context) => const _UtilisateurDialog(),
+      builder: (context) => _UtilisateurDialog(roles: _roles),
     );
 
-    if (created != null && mounted) {
-      setState(() {
-        _utilisateurs.insert(0, created);
-      });
+    if (created == true) _load();
+  }
+
+  Future<void> _toggleActif(Utilisateur user) async {
+    try {
+      await UserService.instance.update(user.id, actif: !user.actif);
+      _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final actifs = _utilisateurs.where((u) => u.statut == 'Actif').length;
+    final actifs = _users.where((u) => u.actif).length;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -96,23 +107,17 @@ class _AdministrationScreenState extends State<AdministrationScreen> {
                             SizedBox(height: 6),
                             Text(
                               'Gérez les comptes et les rôles du personnel de l’établissement.',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Color(0xFF64748B),
-                              ),
+                              style: TextStyle(fontSize: 14, color: Color(0xFF64748B)),
                             ),
                           ],
                         ),
                       ),
                       ElevatedButton.icon(
-                        onPressed: _openCreateDialog,
+                        onPressed: _roles.isEmpty ? null : _openCreateDialog,
                         icon: const Icon(Icons.person_add_alt_1),
                         label: const Text('Nouvel utilisateur'),
                         style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 14,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
                         ),
                       ),
                     ],
@@ -123,7 +128,7 @@ class _AdministrationScreenState extends State<AdministrationScreen> {
                       Expanded(
                         child: StatCard(
                           title: 'Total utilisateurs',
-                          value: '${_utilisateurs.length}',
+                          value: _loading ? '…' : '${_users.length}',
                           icon: Icons.people_outline,
                         ),
                       ),
@@ -131,7 +136,7 @@ class _AdministrationScreenState extends State<AdministrationScreen> {
                       Expanded(
                         child: StatCard(
                           title: 'Comptes actifs',
-                          value: '$actifs',
+                          value: _loading ? '…' : '$actifs',
                           icon: Icons.verified_user_outlined,
                         ),
                       ),
@@ -169,7 +174,20 @@ class _AdministrationScreenState extends State<AdministrationScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          if (_utilisateurs.isEmpty)
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 30),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_error != null)
+            Column(
+              children: [
+                Text(_error!, style: const TextStyle(fontSize: 13, color: Color(0xFFDC2626))),
+                const SizedBox(height: 8),
+                ElevatedButton(onPressed: _load, child: const Text('Réessayer')),
+              ],
+            )
+          else if (_users.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 30),
               child: Center(
@@ -180,13 +198,13 @@ class _AdministrationScreenState extends State<AdministrationScreen> {
               ),
             )
           else
-            ..._utilisateurs.map(_buildRow),
+            ..._users.map(_buildRow),
         ],
       ),
     );
   }
 
-  Widget _buildRow(Utilisateur utilisateur) {
+  Widget _buildRow(Utilisateur user) {
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: const BoxDecoration(
@@ -200,38 +218,37 @@ class _AdministrationScreenState extends State<AdministrationScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${utilisateur.nom} ${utilisateur.prenom}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
+                  user.nomComplet,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  utilisateur.email,
-                  style: const TextStyle(
-                    color: Color(0xFF94A3B8),
-                    fontSize: 11,
-                  ),
+                  user.matricule,
+                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
                 ),
               ],
             ),
           ),
           Expanded(
             child: Text(
-              utilisateur.role,
+              roleLabel(user.role),
               style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
             ),
           ),
           Expanded(
             child: Text(
-              utilisateur.telephone,
+              user.telephone ?? 'Non renseigné',
               style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
             ),
           ),
           StatusPill(
-            label: utilisateur.statut,
-            color: statusColor(utilisateur.statut),
+            label: user.actif ? 'Actif' : 'Inactif',
+            color: statusColor(user.actif ? 'actif' : 'inactif'),
+          ),
+          const SizedBox(width: 12),
+          TextButton(
+            onPressed: () => _toggleActif(user),
+            child: Text(user.actif ? 'Désactiver' : 'Activer'),
           ),
         ],
       ),
@@ -240,7 +257,9 @@ class _AdministrationScreenState extends State<AdministrationScreen> {
 }
 
 class _UtilisateurDialog extends StatefulWidget {
-  const _UtilisateurDialog();
+  final List<Role> roles;
+
+  const _UtilisateurDialog({required this.roles});
 
   @override
   State<_UtilisateurDialog> createState() => _UtilisateurDialogState();
@@ -248,21 +267,57 @@ class _UtilisateurDialog extends StatefulWidget {
 
 class _UtilisateurDialogState extends State<_UtilisateurDialog> {
   final _formKey = GlobalKey<FormState>();
+  final _matriculeController = TextEditingController();
   final _nomController = TextEditingController();
   final _prenomController = TextEditingController();
   final _emailController = TextEditingController();
   final _telephoneController = TextEditingController();
+  final _passwordController = TextEditingController();
 
-  String? _role;
+  Role? _role;
   bool _isSaving = false;
+  String? _error;
 
   @override
   void dispose() {
+    _matriculeController.dispose();
     _nomController.dispose();
     _prenomController.dispose();
     _emailController.dispose();
     _telephoneController.dispose();
+    _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_role == null) {
+      setState(() => _error = 'Veuillez sélectionner un rôle.');
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+      _error = null;
+    });
+
+    try {
+      await UserService.instance.create(
+        matricule: _matriculeController.text.trim(),
+        nom: _nomController.text.trim().toUpperCase(),
+        prenom: _prenomController.text.trim(),
+        roleId: _role!.id,
+        password: _passwordController.text,
+        email: _emailController.text.trim(),
+        telephone: _telephoneController.text.trim(),
+      );
+      if (context.mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      setState(() {
+        _isSaving = false;
+        _error = e.message;
+      });
+    }
   }
 
   @override
@@ -273,159 +328,85 @@ class _UtilisateurDialogState extends State<_UtilisateurDialog> {
         width: 420,
         child: Form(
           key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Nom',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _nomController,
-                textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(
-                  hintText: 'Ex. AFFOGBOLO',
-                  prefixIcon: Icon(Icons.badge_outlined),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (_error != null) ...[
+                  Text(_error!, style: const TextStyle(color: Color(0xFFDC2626), fontSize: 12)),
+                  const SizedBox(height: 8),
+                ],
+                TextFormField(
+                  controller: _matriculeController,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(labelText: 'Matricule', hintText: 'Ex. MED-002'),
+                  validator: (value) =>
+                      (value == null || value.trim().isEmpty) ? 'Ce champ est obligatoire' : null,
                 ),
-                validator: (value) => (value == null || value.trim().isEmpty)
-                    ? 'Ce champ est obligatoire'
-                    : null,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Prénom',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _prenomController,
-                decoration: const InputDecoration(
-                  hintText: 'Ex. Mérite',
-                  prefixIcon: Icon(Icons.person_outline),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _nomController,
+                  textCapitalization: TextCapitalization.characters,
+                  decoration: const InputDecoration(labelText: 'Nom'),
+                  validator: (value) =>
+                      (value == null || value.trim().isEmpty) ? 'Ce champ est obligatoire' : null,
                 ),
-                validator: (value) => (value == null || value.trim().isEmpty)
-                    ? 'Ce champ est obligatoire'
-                    : null,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Rôle',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: _role,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  hintText: 'Sélectionner un rôle',
-                  prefixIcon: Icon(Icons.admin_panel_settings_outlined),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _prenomController,
+                  decoration: const InputDecoration(labelText: 'Prénom'),
+                  validator: (value) =>
+                      (value == null || value.trim().isEmpty) ? 'Ce champ est obligatoire' : null,
                 ),
-                items: _roles
-                    .map(
-                      (role) => DropdownMenuItem(
-                        value: role,
-                        child: Text(role),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) => setState(() => _role = value),
-                validator: (value) =>
-                    value == null ? 'Veuillez sélectionner un rôle' : null,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Email',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _emailController,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  hintText: 'exemple@saintefamille.bj',
-                  prefixIcon: Icon(Icons.email_outlined),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<Role>(
+                  value: _role,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Rôle'),
+                  items: widget.roles
+                      .map((r) => DropdownMenuItem(value: r, child: Text(r.libelle)))
+                      .toList(),
+                  onChanged: (value) => setState(() => _role = value),
                 ),
-                validator: (value) {
-                  final email = value?.trim() ?? '';
-                  if (email.isEmpty) {
-                    return 'Ce champ est obligatoire';
-                  }
-                  if (!email.contains('@') || !email.contains('.')) {
-                    return 'Veuillez saisir un email valide';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Téléphone',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _telephoneController,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  hintText: 'Ex. 97 00 00 00',
-                  prefixIcon: Icon(Icons.phone_outlined),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _emailController,
+                  keyboardType: TextInputType.emailAddress,
+                  decoration: const InputDecoration(labelText: 'Email (optionnel)'),
                 ),
-                validator: (value) => (value == null || value.trim().isEmpty)
-                    ? 'Ce champ est obligatoire'
-                    : null,
-              ),
-            ],
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _telephoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(labelText: 'Téléphone (optionnel)'),
+                ),
+                const SizedBox(height: 12),
+                TextFormField(
+                  controller: _passwordController,
+                  obscureText: true,
+                  decoration: const InputDecoration(labelText: 'Mot de passe initial'),
+                  validator: (value) => (value == null || value.length < 4)
+                      ? 'Au moins 4 caractères'
+                      : null,
+                ),
+              ],
+            ),
           ),
         ),
       ),
       actions: [
         TextButton(
-          onPressed: _isSaving ? null : () => Navigator.pop(context),
+          onPressed: _isSaving ? null : () => Navigator.pop(context, false),
           child: const Text('Annuler'),
         ),
         ElevatedButton(
           onPressed: _isSaving ? null : _save,
           child: _isSaving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Text('Enregistrer'),
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Text('Créer'),
         ),
       ],
     );
-  }
-
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
-    setState(() {
-      _isSaving = true;
-    });
-
-    // Simulation temporaire.
-    // Cette partie sera remplacée par l'appel à l'API REST PHP.
-    await Future.delayed(const Duration(milliseconds: 600));
-
-    final utilisateur = Utilisateur(
-      id: 'USR-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
-      nom: _nomController.text.trim().toUpperCase(),
-      prenom: _prenomController.text.trim(),
-      role: _role!,
-      email: _emailController.text.trim(),
-      telephone: _telephoneController.text.trim(),
-      statut: 'Actif',
-    );
-
-    if (!mounted) return;
-
-    Navigator.pop(context, utilisateur);
   }
 }

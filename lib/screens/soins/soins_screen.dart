@@ -1,19 +1,18 @@
 import 'package:flutter/material.dart';
 
-import '../../data/patient_directory.dart';
-import '../../models/patient.dart';
-import '../../models/soin_infirmier.dart';
+import '../../models/attribution_soin.dart';
+import '../../models/demande_soin.dart';
+import '../../models/salle_soin.dart';
+import '../../models/utilisateur.dart';
+import '../../services/api_exception.dart';
+import '../../services/attribution_soin_service.dart';
+import '../../services/demande_soin_service.dart';
+import '../../services/salle_soin_service.dart';
+import '../../services/soin_service.dart';
+import '../../services/user_service.dart';
 import '../../widgets/module_header.dart';
 import '../../widgets/stat_card.dart';
 import '../../widgets/status_pill.dart';
-
-const List<String> _typesSoin = [
-  'Pansement',
-  'Injection',
-  'Perfusion',
-  'Prise de constantes',
-  'Autre',
-];
 
 class SoinsScreen extends StatefulWidget {
   const SoinsScreen({super.key});
@@ -23,25 +22,264 @@ class SoinsScreen extends StatefulWidget {
 }
 
 class _SoinsScreenState extends State<SoinsScreen> {
-  final List<SoinInfirmier> _soins = [];
+  List<DemandeSoin> _demandes = [];
+  bool _loading = true;
+  String? _error;
+  bool _busy = false;
 
-  Future<void> _openCreateDialog() async {
-    final created = await showDialog<SoinInfirmier>(
-      context: context,
-      builder: (context) => const _SoinDialog(),
-    );
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
 
-    if (created != null && mounted) {
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final demandes = await DemandeSoinService.instance.list();
+      if (!mounted) return;
       setState(() {
-        _soins.insert(0, created);
+        _demandes = demandes;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
       });
     }
   }
 
+  Future<void> _attribuer(DemandeSoin demande) async {
+    List<Utilisateur> infirmiers;
+    List<SalleSoin> salles;
+    try {
+      final results = await Future.wait([
+        UserService.instance.list(),
+        SalleSoinService.instance.list(),
+      ]);
+      infirmiers = (results[0] as List<Utilisateur>)
+          .where((u) => u.role == 'infirmier' && u.actif)
+          .toList();
+      salles = results[1] as List<SalleSoin>;
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    }
+
+    if (!mounted) return;
+
+    Utilisateur? selectedInfirmier;
+    SalleSoin? selectedSalle;
+    bool isSaving = false;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text('Attribuer — ${demande.patientNom ?? 'Dossier #${demande.dossierId}'}'),
+            content: SizedBox(
+              width: 380,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  DropdownButtonFormField<Utilisateur>(
+                    value: selectedInfirmier,
+                    isExpanded: true,
+                    decoration: const InputDecoration(hintText: 'Infirmier(ère)'),
+                    items: infirmiers
+                        .map((i) => DropdownMenuItem(value: i, child: Text(i.nomComplet)))
+                        .toList(),
+                    onChanged: (value) => setDialogState(() => selectedInfirmier = value),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<SalleSoin>(
+                    value: selectedSalle,
+                    isExpanded: true,
+                    decoration: const InputDecoration(hintText: 'Salle de soins (optionnel)'),
+                    items: salles
+                        .map((s) => DropdownMenuItem(value: s, child: Text(s.nom)))
+                        .toList(),
+                    onChanged: (value) => setDialogState(() => selectedSalle = value),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(context, false),
+                child: const Text('Annuler'),
+              ),
+              ElevatedButton(
+                onPressed: (isSaving || selectedInfirmier == null)
+                    ? null
+                    : () async {
+                        setDialogState(() => isSaving = true);
+                        try {
+                          await AttributionSoinService.instance.create(
+                            demandeSoinId: demande.id,
+                            infirmierId: selectedInfirmier!.id,
+                            salleSoinId: selectedSalle?.id,
+                          );
+                          if (context.mounted) Navigator.pop(context, true);
+                        } on ApiException catch (e) {
+                          setDialogState(() => isSaving = false);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(e.message)),
+                            );
+                          }
+                        }
+                      },
+                child: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Attribuer'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (ok == true) _load();
+  }
+
+  Future<void> _demarrer(DemandeSoin demande) async {
+    if (demande.attributionId == null) return;
+
+    setState(() => _busy = true);
+    try {
+      await AttributionSoinService.instance.updateStatut(demande.attributionId!, 'en_cours');
+      _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _realiser(DemandeSoin demande) async {
+    if (demande.attributionId == null) return;
+
+    AttributionSoin attribution;
+    try {
+      attribution = await AttributionSoinService.instance.getById(demande.attributionId!);
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    }
+
+    if (attribution.soinId == null || !mounted) return;
+
+    final realiseController = TextEditingController();
+    final observationsController = TextEditingController();
+    final incidentController = TextEditingController();
+    bool valide = true;
+    bool isSaving = false;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: Text('Réaliser le soin — ${demande.patientNom ?? ''}'),
+            content: SizedBox(
+              width: 400,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: realiseController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(labelText: 'Soin réalisé'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: observationsController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(labelText: 'Observations (optionnel)'),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: incidentController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(labelText: 'Incident (optionnel)'),
+                  ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: valide,
+                    onChanged: (value) => setDialogState(() => valide = value ?? true),
+                    title: const Text('Valider le soin', style: TextStyle(fontSize: 13)),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(context, false),
+                child: const Text('Annuler'),
+              ),
+              ElevatedButton(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        setDialogState(() => isSaving = true);
+                        try {
+                          await SoinService.instance.update(
+                            attribution.soinId!,
+                            soinRealise: realiseController.text.trim(),
+                            observations: observationsController.text.trim(),
+                            incident: incidentController.text.trim(),
+                            valide: valide,
+                          );
+                          if (context.mounted) Navigator.pop(context, true);
+                        } on ApiException catch (e) {
+                          setDialogState(() => isSaving = false);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(e.message)),
+                            );
+                          }
+                        }
+                      },
+                child: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Enregistrer'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (ok == true) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
-    final planifies = _soins.where((s) => s.statut == 'Planifié').length;
-    final realises = _soins.where((s) => s.statut == 'Réalisé').length;
+    final enAttente = _demandes.where((d) => d.statut == 'en_attente').length;
+    final enCours = _demandes.where((d) => d.statut == 'attribue' || d.statut == 'en_cours').length;
+    final termines = _demandes.where((d) => d.statut == 'termine').length;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -54,68 +292,43 @@ class _SoinsScreenState extends State<SoinsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Soins infirmiers',
-                              style: TextStyle(
-                                fontSize: 25,
-                                fontWeight: FontWeight.w700,
-                                color: Color(0xFF1E293B),
-                              ),
-                            ),
-                            SizedBox(height: 6),
-                            Text(
-                              'Planifiez et suivez les soins réalisés auprès des patients.',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Color(0xFF64748B),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      ElevatedButton.icon(
-                        onPressed: _openCreateDialog,
-                        icon: const Icon(Icons.add),
-                        label: const Text('Nouveau soin'),
-                        style: ElevatedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 18,
-                            vertical: 14,
-                          ),
-                        ),
-                      ),
-                    ],
+                  const Text(
+                    'Soins infirmiers',
+                    style: TextStyle(
+                      fontSize: 25,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF1E293B),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Attribuez les demandes de soins créées par les médecins et suivez leur réalisation.',
+                    style: TextStyle(fontSize: 14, color: Color(0xFF64748B)),
                   ),
                   const SizedBox(height: 24),
                   Row(
                     children: [
                       Expanded(
                         child: StatCard(
-                          title: 'Planifiés',
-                          value: '$planifies',
+                          title: 'En attente d’attribution',
+                          value: '$enAttente',
                           icon: Icons.pending_actions_outlined,
                         ),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
                         child: StatCard(
-                          title: 'Réalisés',
-                          value: '$realises',
-                          icon: Icons.check_circle_outline,
+                          title: 'En cours',
+                          value: '$enCours',
+                          icon: Icons.healing_outlined,
                         ),
                       ),
                       const SizedBox(width: 16),
                       Expanded(
                         child: StatCard(
-                          title: 'Total',
-                          value: '${_soins.length}',
-                          icon: Icons.healing_outlined,
+                          title: 'Terminés',
+                          value: '$termines',
+                          icon: Icons.check_circle_outline,
                         ),
                       ),
                     ],
@@ -143,33 +356,81 @@ class _SoinsScreenState extends State<SoinsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Soins enregistrés',
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF1E293B),
-            ),
+          Row(
+            children: [
+              const Text(
+                'Demandes de soins',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1E293B),
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Actualiser',
+                onPressed: _load,
+                icon: const Icon(Icons.refresh, size: 20),
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
-          if (_soins.isEmpty)
+          const SizedBox(height: 8),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 30),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_error != null)
+            Column(
+              children: [
+                Text(_error!, style: const TextStyle(fontSize: 13, color: Color(0xFFDC2626))),
+                const SizedBox(height: 8),
+                ElevatedButton(onPressed: _load, child: const Text('Réessayer')),
+              ],
+            )
+          else if (_demandes.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 30),
               child: Center(
                 child: Text(
-                  'Aucun soin enregistré pour le moment.',
+                  'Aucune demande de soins pour le moment.',
                   style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
                 ),
               ),
             )
           else
-            ..._soins.map(_buildRow),
+            ..._demandes.map(_buildRow),
         ],
       ),
     );
   }
 
-  Widget _buildRow(SoinInfirmier soin) {
+  Widget _buildRow(DemandeSoin demande) {
+    Widget? action;
+
+    if (!_busy) {
+      switch (demande.statut) {
+        case 'en_attente':
+          action = TextButton(
+            onPressed: () => _attribuer(demande),
+            child: const Text('Attribuer'),
+          );
+          break;
+        case 'attribue':
+          action = TextButton(
+            onPressed: () => _demarrer(demande),
+            child: const Text('Démarrer'),
+          );
+          break;
+        case 'en_cours':
+          action = TextButton(
+            onPressed: () => _realiser(demande),
+            child: const Text('Réaliser'),
+          );
+          break;
+      }
+    }
+
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: const BoxDecoration(
@@ -183,222 +444,27 @@ class _SoinsScreenState extends State<SoinsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${soin.patient.nom} ${soin.patient.prenom}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
+                  demande.patientNom ?? 'Dossier #${demande.dossierId}',
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  soin.typeSoin,
-                  style: const TextStyle(
-                    color: Color(0xFF94A3B8),
-                    fontSize: 11,
-                  ),
+                  demande.typeSoin ?? '',
+                  style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
                 ),
               ],
             ),
           ),
-          Expanded(
-            child: Text(
-              soin.infirmier,
-              style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+          if (demande.priorite == 'urgente')
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: Icon(Icons.priority_high, size: 16, color: Color(0xFFDC2626)),
             ),
-          ),
-          Expanded(
-            child: Text(
-              _formatDateTime(soin.dateHeure),
-              style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-            ),
-          ),
-          StatusPill(label: soin.statut, color: statusColor(soin.statut)),
+          StatusPill(label: statusLabel(demande.statut), color: statusColor(demande.statut)),
+          const SizedBox(width: 12),
+          SizedBox(width: 100, child: action),
         ],
       ),
     );
-  }
-
-  String _formatDateTime(DateTime date) {
-    final day = date.day.toString().padLeft(2, '0');
-    final month = date.month.toString().padLeft(2, '0');
-    final hour = date.hour.toString().padLeft(2, '0');
-    final minute = date.minute.toString().padLeft(2, '0');
-    return '$day/$month à $hour:$minute';
-  }
-}
-
-class _SoinDialog extends StatefulWidget {
-  const _SoinDialog();
-
-  @override
-  State<_SoinDialog> createState() => _SoinDialogState();
-}
-
-class _SoinDialogState extends State<_SoinDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _infirmierController = TextEditingController();
-  final _notesController = TextEditingController();
-
-  Patient? _patient;
-  String? _typeSoin;
-  bool _isSaving = false;
-
-  @override
-  void dispose() {
-    _infirmierController.dispose();
-    _notesController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final patients = PatientDirectory.all;
-
-    return AlertDialog(
-      title: const Text('Nouveau soin'),
-      content: SizedBox(
-        width: 420,
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Patient',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<Patient>(
-                value: _patient,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  hintText: 'Sélectionner un patient',
-                  prefixIcon: Icon(Icons.person_outline),
-                ),
-                items: patients
-                    .map(
-                      (patient) => DropdownMenuItem(
-                        value: patient,
-                        child: Text(
-                          '${patient.nom} ${patient.prenom} (${patient.id})',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) => setState(() => _patient = value),
-                validator: (value) =>
-                    value == null ? 'Veuillez sélectionner un patient' : null,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Type de soin',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              DropdownButtonFormField<String>(
-                value: _typeSoin,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  hintText: 'Sélectionner un type de soin',
-                  prefixIcon: Icon(Icons.healing_outlined),
-                ),
-                items: _typesSoin
-                    .map(
-                      (type) => DropdownMenuItem(
-                        value: type,
-                        child: Text(type),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) => setState(() => _typeSoin = value),
-                validator: (value) =>
-                    value == null ? 'Veuillez sélectionner un type' : null,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Infirmier(ère)',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _infirmierController,
-                decoration: const InputDecoration(
-                  hintText: 'Ex. Inf. Chantal Dossou',
-                  prefixIcon: Icon(Icons.badge_outlined),
-                ),
-                validator: (value) => (value == null || value.trim().isEmpty)
-                    ? 'Ce champ est obligatoire'
-                    : null,
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Notes (optionnel)',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 8),
-              TextFormField(
-                controller: _notesController,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  hintText: 'Observations complémentaires',
-                  prefixIcon: Icon(Icons.notes_outlined),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: _isSaving ? null : () => Navigator.pop(context),
-          child: const Text('Annuler'),
-        ),
-        ElevatedButton(
-          onPressed: _isSaving ? null : _save,
-          child: _isSaving
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Text('Enregistrer'),
-        ),
-      ],
-    );
-  }
-
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
-
-    setState(() {
-      _isSaving = true;
-    });
-
-    // Simulation temporaire.
-    // Cette partie sera remplacée par l'appel à l'API REST PHP.
-    await Future.delayed(const Duration(milliseconds: 600));
-
-    final notes = _notesController.text.trim();
-
-    final soin = SoinInfirmier(
-      id: 'SOIN-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
-      patient: _patient!,
-      typeSoin: _typeSoin!,
-      infirmier: _infirmierController.text.trim(),
-      dateHeure: DateTime.now(),
-      statut: 'Planifié',
-      notes: notes.isEmpty ? null : notes,
-    );
-
-    if (!mounted) return;
-
-    Navigator.pop(context, soin);
   }
 }

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
-import '../../data/queue_directory.dart';
-import '../../models/prise_en_charge.dart';
+import '../../models/file_attente_entry.dart';
+import '../../models/utilisateur.dart';
+import '../../services/api_exception.dart';
+import '../../services/file_attente_service.dart';
+import '../../services/user_service.dart';
 import '../../widgets/module_header.dart';
 import '../../widgets/stat_card.dart';
 import '../../widgets/status_pill.dart';
@@ -14,39 +17,112 @@ class FileAttenteScreen extends StatefulWidget {
 }
 
 class _FileAttenteScreenState extends State<FileAttenteScreen> {
-  late List<PriseEnCharge> _entries;
+  List<FileAttenteEntry> _entries = [];
+  bool _loading = true;
+  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _entries = QueueDirectory.all;
+    _load();
   }
 
-  void _refresh() {
+  Future<void> _load() async {
     setState(() {
-      _entries = QueueDirectory.all;
+      _loading = true;
+      _error = null;
     });
+
+    try {
+      final entries = await FileAttenteService.instance.list();
+      if (!mounted) return;
+      setState(() {
+        _entries = entries;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
   }
 
-  void _advance(PriseEnCharge entry) {
-    final next = switch (entry.statut) {
-      'En attente' => 'En consultation',
-      'En consultation' => 'Terminé',
-      _ => entry.statut,
-    };
+  Future<void> _advance(FileAttenteEntry entry) async {
+    switch (entry.statut) {
+      case 'en_attente':
+        await _appelerPatient(entry);
+        break;
+      case 'appele':
+        await _updateStatut(entry, 'en_consultation');
+        break;
+      case 'en_consultation':
+        await _updateStatut(entry, 'termine');
+        break;
+    }
+  }
 
-    if (next == entry.statut) return;
+  Future<void> _appelerPatient(FileAttenteEntry entry) async {
+    List<Utilisateur> medecins;
+    try {
+      final users = await UserService.instance.list();
+      medecins = users.where((u) => u.role == 'medecin' && u.actif).toList();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+      return;
+    }
 
-    QueueDirectory.updateStatut(entry.id, next);
-    _refresh();
+    if (!mounted) return;
+
+    final selected = await showDialog<Utilisateur>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('Appeler le patient — choisir le médecin'),
+        children: medecins.isEmpty
+            ? [
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                  child: Text('Aucun médecin actif enregistré.'),
+                ),
+              ]
+            : medecins
+                .map(
+                  (m) => SimpleDialogOption(
+                    onPressed: () => Navigator.pop(context, m),
+                    child: Text(m.nomComplet),
+                  ),
+                )
+                .toList(),
+      ),
+    );
+
+    if (selected == null) return;
+
+    await _updateStatut(entry, 'appele', medecinId: selected.id);
+  }
+
+  Future<void> _updateStatut(FileAttenteEntry entry, String statut, {int? medecinId}) async {
+    try {
+      await FileAttenteService.instance.updateStatut(
+        entry.id,
+        statut: statut,
+        medecinId: medecinId,
+      );
+      _load();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final enAttente = _entries.where((e) => e.statut == 'En attente').length;
-    final enConsultation =
-        _entries.where((e) => e.statut == 'En consultation').length;
-    final termines = _entries.where((e) => e.statut == 'Terminé').length;
+    final enAttente = _entries.where((e) => e.statut == 'en_attente').length;
+    final appele = _entries.where((e) => e.statut == 'appele').length;
+    final enConsultation = _entries.where((e) => e.statut == 'en_consultation').length;
+    final termines = _entries.where((e) => e.statut == 'termine').length;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
@@ -69,7 +145,7 @@ class _FileAttenteScreenState extends State<FileAttenteScreen> {
                   ),
                   const SizedBox(height: 6),
                   const Text(
-                    'Suivez et faites progresser les patients enregistrés à la réception.',
+                    'Patients envoyés en file d’attente après confirmation de paiement.',
                     style: TextStyle(fontSize: 14, color: Color(0xFF64748B)),
                   ),
                   const SizedBox(height: 24),
@@ -80,6 +156,14 @@ class _FileAttenteScreenState extends State<FileAttenteScreen> {
                           title: 'En attente',
                           value: '$enAttente',
                           icon: Icons.hourglass_empty,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: StatCard(
+                          title: 'Appelés',
+                          value: '$appele',
+                          icon: Icons.campaign_outlined,
                         ),
                       ),
                       const SizedBox(width: 16),
@@ -123,21 +207,47 @@ class _FileAttenteScreenState extends State<FileAttenteScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Patients dans la file',
-            style: TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF1E293B),
-            ),
+          Row(
+            children: [
+              const Text(
+                'Patients dans la file',
+                style: TextStyle(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF1E293B),
+                ),
+              ),
+              const Spacer(),
+              IconButton(
+                tooltip: 'Actualiser',
+                onPressed: _load,
+                icon: const Icon(Icons.refresh, size: 20),
+              ),
+            ],
           ),
-          const SizedBox(height: 16),
-          if (_entries.isEmpty)
+          const SizedBox(height: 8),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 30),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_error != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20),
+              child: Column(
+                children: [
+                  Text(_error!, style: const TextStyle(fontSize: 13, color: Color(0xFFDC2626))),
+                  const SizedBox(height: 8),
+                  ElevatedButton(onPressed: _load, child: const Text('Réessayer')),
+                ],
+              ),
+            )
+          else if (_entries.isEmpty)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 30),
               child: Center(
                 child: Text(
-                  'Aucun patient dans la file d’attente. Enregistrez une arrivée depuis la Réception.',
+                  'Aucun patient dans la file d’attente. Envoyez un dossier après confirmation de paiement.',
                   textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
                 ),
@@ -150,8 +260,21 @@ class _FileAttenteScreenState extends State<FileAttenteScreen> {
     );
   }
 
-  Widget _buildRow(PriseEnCharge entry) {
-    final isTermine = entry.statut == 'Terminé';
+  Widget _buildRow(FileAttenteEntry entry) {
+    final isTermine = entry.statut == 'termine' || entry.statut == 'annule';
+
+    String actionLabel() {
+      switch (entry.statut) {
+        case 'en_attente':
+          return 'Appeler';
+        case 'appele':
+          return 'Démarrer';
+        case 'en_consultation':
+          return 'Terminer';
+        default:
+          return '';
+      }
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
@@ -169,7 +292,7 @@ class _FileAttenteScreenState extends State<FileAttenteScreen> {
             ),
             child: Center(
               child: Text(
-                entry.numero,
+                '#${entry.id}',
                 style: const TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
@@ -181,28 +304,17 @@ class _FileAttenteScreenState extends State<FileAttenteScreen> {
           const SizedBox(width: 12),
           Expanded(
             flex: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${entry.patient.nom} ${entry.patient.prenom}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  entry.service,
-                  style: const TextStyle(
-                    color: Color(0xFF94A3B8),
-                    fontSize: 11,
-                  ),
-                ),
-              ],
+            child: Text(
+              entry.patientNom ?? 'Dossier #${entry.dossierId}',
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
             ),
           ),
-          StatusPill(label: entry.statut, color: statusColor(entry.statut)),
+          if (entry.priorite == 'urgente')
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: Icon(Icons.priority_high, size: 16, color: Color(0xFFDC2626)),
+            ),
+          StatusPill(label: statusLabel(entry.statut), color: statusColor(entry.statut)),
           const SizedBox(width: 12),
           SizedBox(
             width: 90,
@@ -210,9 +322,7 @@ class _FileAttenteScreenState extends State<FileAttenteScreen> {
                 ? null
                 : TextButton(
                     onPressed: () => _advance(entry),
-                    child: Text(
-                      entry.statut == 'En attente' ? 'Appeler' : 'Terminer',
-                    ),
+                    child: Text(actionLabel()),
                   ),
           ),
         ],

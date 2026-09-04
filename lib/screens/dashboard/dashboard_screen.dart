@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
-import '../../data/queue_directory.dart';
-import '../../models/prise_en_charge.dart';
+import '../../models/app_notification.dart';
+import '../../models/file_attente_entry.dart';
+import '../../models/role.dart';
+import '../../services/api_exception.dart';
+import '../../services/auth_service.dart';
+import '../../services/demande_soin_service.dart';
+import '../../services/file_attente_service.dart';
+import '../../services/notification_service.dart';
+import '../../services/patient_service.dart';
 import '../../widgets/status_pill.dart';
 import '../administration/administration_screen.dart';
 import '../auth/login_screen.dart';
@@ -23,6 +30,14 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   final int _selectedIndex = 0;
+
+  bool _loadingStats = true;
+  String? _statsError;
+  int _totalPatients = 0;
+  List<FileAttenteEntry> _queue = [];
+  int _demandesSoinsEnAttente = 0;
+
+  List<AppNotification> _notifications = [];
 
   final List<_MenuItem> _menuItems = const [
     _MenuItem(
@@ -64,6 +79,79 @@ class _DashboardScreenState extends State<DashboardScreen> {
   ];
 
   @override
+  void initState() {
+    super.initState();
+    _loadDashboardData();
+    _loadNotifications();
+  }
+
+  Future<void> _loadDashboardData() async {
+    setState(() {
+      _loadingStats = true;
+      _statsError = null;
+    });
+
+    try {
+      final results = await Future.wait([
+        PatientService.instance.total(),
+        FileAttenteService.instance.list(),
+        DemandeSoinService.instance.list(statut: 'en_attente'),
+      ]);
+
+      if (!mounted) return;
+
+      setState(() {
+        _totalPatients = results[0] as int;
+        _queue = results[1] as List<FileAttenteEntry>;
+        _demandesSoinsEnAttente = (results[2] as List).length;
+        _loadingStats = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _statsError = e.message;
+        _loadingStats = false;
+      });
+    }
+  }
+
+  Future<void> _loadNotifications() async {
+    try {
+      final notifications = await NotificationService.instance.list(lu: false);
+      if (!mounted) return;
+      setState(() {
+        _notifications = notifications;
+      });
+    } on ApiException {
+      // Les notifications sont un confort, pas critique : on échoue en silence.
+    }
+  }
+
+  Future<void> _openNotifications() async {
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) => _NotificationsSheet(
+        notifications: _notifications,
+        onMarkRead: (notification) async {
+          try {
+            await NotificationService.instance.marquerLue(notification.id);
+            if (!mounted) return;
+            setState(() {
+              _notifications = _notifications.where((n) => n.id != notification.id).toList();
+            });
+          } on ApiException catch (e) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text(e.message), behavior: SnackBarBehavior.floating),
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: Row(
@@ -78,6 +166,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildSidebar() {
+    final user = AuthService.instance.currentUser;
+    final initiales = user == null
+        ? '?'
+        : '${user.nom.isNotEmpty ? user.nom[0] : ''}${user.prenom.isNotEmpty ? user.prenom[0] : ''}'
+            .toUpperCase();
+
     return Container(
       width: 260,
       decoration: const BoxDecoration(
@@ -180,10 +274,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     color: AppTheme.primaryColor,
                     shape: BoxShape.circle,
                   ),
-                  child: const Center(
+                  child: Center(
                     child: Text(
-                      'MA',
-                      style: TextStyle(
+                      initiales,
+                      style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.w700,
                       ),
@@ -191,23 +285,23 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                 ),
                 const SizedBox(width: 10),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Utilisateur',
+                        user == null ? 'Utilisateur' : user.nomComplet,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontWeight: FontWeight.w600,
                           fontSize: 13,
                         ),
                       ),
-                      SizedBox(height: 3),
+                      const SizedBox(height: 3),
                       Text(
-                        'Administrateur',
+                        user == null ? '' : roleLabel(user.role),
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
+                        style: const TextStyle(
                           color: Color(0xFF64748B),
                           fontSize: 11,
                         ),
@@ -218,6 +312,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 IconButton(
                   tooltip: 'Déconnexion',
                   onPressed: () {
+                    AuthService.instance.logout();
                     Navigator.of(context).pushAndRemoveUntil(
                       MaterialPageRoute(
                         builder: (context) => const LoginScreen(),
@@ -288,7 +383,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   /// Ouvre l'écran du module correspondant à l'entrée sélectionnée dans
   /// le menu latéral (l'index 0, Tableau de bord, reste sur cet écran).
-  void _openModule(int index) {
+  Future<void> _openModule(int index) async {
     final Widget screen;
 
     switch (index) {
@@ -320,9 +415,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
         return;
     }
 
-    Navigator.of(context).push(
+    await Navigator.of(context).push(
       MaterialPageRoute(builder: (context) => screen),
     );
+
+    // Les données ont pu changer pendant que l'utilisateur était sur un
+    // autre module (nouveau patient, file d'attente mise à jour...).
+    if (mounted) {
+      _loadDashboardData();
+    }
   }
 
   Widget _buildMainContent() {
@@ -364,35 +465,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
           const Spacer(),
 
-          // Recherche
-          Container(
-            width: 240,
-            height: 42,
-            decoration: BoxDecoration(
-              color: const Color(0xFFF5F7FA),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const TextField(
-              decoration: InputDecoration(
-                hintText: 'Rechercher...',
-                prefixIcon: Icon(
-                  Icons.search,
-                  size: 20,
-                ),
-                border: InputBorder.none,
-                filled: false,
-              ),
-            ),
-          ),
-
-          const SizedBox(width: 12),
-
           // Notifications
           IconButton(
             tooltip: 'Notifications',
-            onPressed: () {},
+            onPressed: _openNotifications,
             icon: Badge(
-              label: const Text('3'),
+              label: Text('${_notifications.length}'),
+              isLabelVisible: _notifications.isNotEmpty,
               child: const Icon(
                 Icons.notifications_none_outlined,
               ),
@@ -402,12 +481,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(width: 8),
 
           // Profil
-          const CircleAvatar(
+          CircleAvatar(
             radius: 19,
             backgroundColor: AppTheme.primaryColor,
             child: Text(
-              'MA',
-              style: TextStyle(
+              _initialesUtilisateur(),
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
@@ -419,13 +498,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  String _initialesUtilisateur() {
+    final user = AuthService.instance.currentUser;
+    if (user == null) return '?';
+    return '${user.nom.isNotEmpty ? user.nom[0] : ''}${user.prenom.isNotEmpty ? user.prenom[0] : ''}'
+        .toUpperCase();
+  }
+
   Widget _buildDashboardBody() {
+    final user = AuthService.instance.currentUser;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Bonjour, bienvenue 👋',
-          style: TextStyle(
+        Text(
+          user == null ? 'Bonjour 👋' : 'Bonjour ${user.prenom} 👋',
+          style: const TextStyle(
             fontSize: 26,
             fontWeight: FontWeight.w700,
             color: Color(0xFF1E293B),
@@ -444,6 +532,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
         const SizedBox(height: 28),
 
+        if (_statsError != null) _buildStatsErrorBanner(),
+
         // Statistiques
         LayoutBuilder(
           builder: (context, constraints) {
@@ -455,6 +545,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     ? (width - 16) / 2
                     : width;
 
+            final enAttente =
+                _queue.where((e) => e.statut == 'en_attente').length;
+            final enConsultation =
+                _queue.where((e) => e.statut == 'en_consultation').length;
+
             return Wrap(
               spacing: 16,
               runSpacing: 16,
@@ -462,17 +557,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 SizedBox(
                   width: cardWidth,
                   child: _buildStatCard(
-                    title: 'Patients aujourd’hui',
-                    value: '48',
+                    title: 'Patients enregistrés',
+                    value: _loadingStats ? '…' : '$_totalPatients',
                     icon: Icons.people_outline,
-                    subtitle: '+8 depuis hier',
+                    subtitle: 'Au total',
                   ),
                 ),
                 SizedBox(
                   width: cardWidth,
                   child: _buildStatCard(
                     title: 'En attente',
-                    value: '12',
+                    value: _loadingStats ? '…' : '$enAttente',
                     icon: Icons.queue_outlined,
                     subtitle: 'File de consultation',
                   ),
@@ -480,19 +575,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 SizedBox(
                   width: cardWidth,
                   child: _buildStatCard(
-                    title: 'Consultations',
-                    value: '31',
+                    title: 'En consultation',
+                    value: _loadingStats ? '…' : '$enConsultation',
                     icon: Icons.medical_services_outlined,
-                    subtitle: 'Aujourd’hui',
+                    subtitle: 'En ce moment',
                   ),
                 ),
                 SizedBox(
                   width: cardWidth,
                   child: _buildStatCard(
-                    title: 'Soins en cours',
-                    value: '7',
+                    title: 'Demandes de soins',
+                    value: _loadingStats ? '…' : '$_demandesSoinsEnAttente',
                     icon: Icons.local_hospital_outlined,
-                    subtitle: 'Prise en charge infirmière',
+                    subtitle: 'En attente d’attribution',
                   ),
                 ),
               ],
@@ -533,6 +628,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
           },
         ),
       ],
+    );
+  }
+
+  Widget _buildStatsErrorBanner() {
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 20),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFFECACA)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, color: Color(0xFFDC2626), size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              _statsError!,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF991B1B)),
+            ),
+          ),
+          TextButton(
+            onPressed: _loadDashboardData,
+            child: const Text('Réessayer'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -608,7 +732,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildQueueCard() {
-    final entries = QueueDirectory.all.take(5).toList();
+    final entries = _queue.take(5).toList();
 
     return _buildSectionCard(
       title: 'File d’attente',
@@ -616,21 +740,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
         onPressed: () => _openModule(4),
         child: const Text('Voir tout'),
       ),
-      child: entries.isEmpty
+      child: _loadingStats
           ? const Padding(
-              padding: EdgeInsets.symmetric(vertical: 20),
-              child: Text(
-                'Aucun patient dans la file d’attente pour le moment.',
-                style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
-              ),
+              padding: EdgeInsets.symmetric(vertical: 30),
+              child: Center(child: CircularProgressIndicator()),
             )
-          : Column(
-              children: entries.map(_buildQueueRow).toList(),
-            ),
+          : entries.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 20),
+                  child: Text(
+                    'Aucun patient dans la file d’attente pour le moment.',
+                    style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+                  ),
+                )
+              : Column(
+                  children: entries.map(_buildQueueRow).toList(),
+                ),
     );
   }
 
-  Widget _buildQueueRow(PriseEnCharge entry) {
+  Widget _buildQueueRow(FileAttenteEntry entry) {
     final color = statusColor(entry.statut);
 
     return Container(
@@ -653,7 +782,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             child: Center(
               child: Text(
-                entry.numero,
+                '#${entry.id}',
                 style: const TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
@@ -666,25 +795,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
           const SizedBox(width: 12),
 
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${entry.patient.nom} ${entry.patient.prenom}',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 13,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  entry.service,
-                  style: const TextStyle(
-                    color: Color(0xFF94A3B8),
-                    fontSize: 11,
-                  ),
-                ),
-              ],
+            child: Text(
+              entry.patientNom ?? 'Dossier #${entry.dossierId}',
+              style: const TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
             ),
           ),
 
@@ -698,7 +814,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              entry.statut,
+              statusLabel(entry.statut),
               style: TextStyle(
                 color: color,
                 fontSize: 11,
@@ -723,10 +839,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
             onTap: () => _openModule(1),
           ),
           _buildQuickAction(
-            icon: Icons.search,
-            title: 'Rechercher un patient',
-            subtitle: 'Ouvrir un dossier existant',
-            onTap: () => _openModule(1),
+            icon: Icons.how_to_reg_outlined,
+            title: 'Réception',
+            subtitle: 'Enregistrer une arrivée',
+            onTap: () => _openModule(2),
           ),
           _buildQuickAction(
             icon: Icons.queue_outlined,
@@ -855,4 +971,68 @@ class _MenuItem {
     required this.title,
     required this.icon,
   });
+}
+
+class _NotificationsSheet extends StatelessWidget {
+  final List<AppNotification> notifications;
+  final Future<void> Function(AppNotification) onMarkRead;
+
+  const _NotificationsSheet({
+    required this.notifications,
+    required this.onMarkRead,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Notifications',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 16),
+            if (notifications.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Text(
+                  'Aucune notification non lue.',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+                ),
+              )
+            else
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.5,
+                ),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: notifications.length,
+                  separatorBuilder: (context, index) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final notification = notifications[index];
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        notification.contenu,
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                      trailing: IconButton(
+                        tooltip: 'Marquer comme lue',
+                        icon: const Icon(Icons.check_circle_outline, size: 20),
+                        onPressed: () => onMarkRead(notification),
+                      ),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
