@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../models/patient.dart';
-import 'patient_detail_screen.dart';
+import '../../services/api_exception.dart';
+import '../../services/patient_service.dart';
 import 'create_patient_screen.dart';
+import 'patient_detail_screen.dart';
 
 class PatientsScreen extends StatefulWidget {
   const PatientsScreen({super.key});
@@ -15,55 +19,57 @@ class PatientsScreen extends StatefulWidget {
 class _PatientsScreenState extends State<PatientsScreen> {
   final TextEditingController _searchController = TextEditingController();
 
-  String _searchQuery = '';
+  List<Patient> _patients = [];
+  int _totalPatients = 0;
+  bool _loading = true;
+  String? _error;
+  Timer? _debounce;
 
-  final List<Patient> _patients = [
-    Patient(
-      id: 'SF-2026-0001',
-      nom: 'ADEKUNLE',
-      prenom: 'Jean',
-      sexe: 'Homme',
-      age: 34,
-      telephone: '97 00 00 01',
-      statut: 'Actif',
-    ),
-    Patient(
-      id: 'SF-2026-0002',
-      nom: 'AHOYO',
-      prenom: 'Marie',
-      sexe: 'Femme',
-      age: 28,
-      telephone: '96 00 00 02',
-      statut: 'Actif',
-    ),
-    Patient(
-      id: 'SF-2026-0003',
-      nom: 'ASSOGBA',
-      prenom: 'Paul',
-      sexe: 'Homme',
-      age: 46,
-      telephone: '95 00 00 03',
-      statut: 'Actif',
-    ),
-    Patient(
-      id: 'SF-2026-0004',
-      nom: 'GBETO',
-      prenom: 'Grâce',
-      sexe: 'Femme',
-      age: 39,
-      telephone: '94 00 00 04',
-      statut: 'Actif',
-    ),
-    Patient(
-      id: 'SF-2026-0005',
-      nom: 'HOUNKPE',
-      prenom: 'David',
-      sexe: 'Homme',
-      age: 51,
-      telephone: '90 00 00 05',
-      statut: 'Actif',
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _debounce?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final results = await Future.wait([
+        PatientService.instance.search(q: _searchController.text),
+        PatientService.instance.total(),
+      ]);
+
+      if (!mounted) return;
+
+      setState(() {
+        _patients = results[0] as List<Patient>;
+        _totalPatients = results[1] as int;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
+
+  void _onSearchChanged(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), _load);
+  }
 
   Future<void> _openCreatePatient() async {
     final patient = await Navigator.of(context).push<Patient>(
@@ -74,10 +80,6 @@ class _PatientsScreenState extends State<PatientsScreen> {
       return;
     }
 
-    setState(() {
-      _patients.insert(0, patient);
-    });
-
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
@@ -86,27 +88,18 @@ class _PatientsScreenState extends State<PatientsScreen> {
         behavior: SnackBarBehavior.floating,
       ),
     );
+
+    _load();
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
-  }
-
-  List<Patient> get _filteredPatients {
-    if (_searchQuery.trim().isEmpty) {
-      return _patients;
-    }
-
-    final query = _searchQuery.toLowerCase().trim();
-
-    return _patients.where((patient) {
-      return patient.nom.toLowerCase().contains(query) ||
-          patient.prenom.toLowerCase().contains(query) ||
-          patient.id.toLowerCase().contains(query) ||
-          patient.telephone.contains(query);
-    }).toList();
+  void _showPatientDetails(Patient patient) {
+    Navigator.of(context)
+        .push(
+          MaterialPageRoute(
+            builder: (context) => PatientDetailScreen(patientId: patient.id),
+          ),
+        )
+        .then((_) => _load());
   }
 
   @override
@@ -123,13 +116,9 @@ class _PatientsScreenState extends State<PatientsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   _buildPageIntroduction(),
-
                   const SizedBox(height: 24),
-
                   _buildStatistics(),
-
                   const SizedBox(height: 24),
-
                   _buildPatientList(),
                 ],
               ),
@@ -164,29 +153,6 @@ class _PatientsScreenState extends State<PatientsScreen> {
               color: Color(0xFF1E293B),
             ),
           ),
-
-          const Spacer(),
-
-          IconButton(
-            tooltip: 'Notifications',
-            onPressed: () {},
-            icon: const Icon(Icons.notifications_none_outlined),
-          ),
-
-          const SizedBox(width: 10),
-
-          const CircleAvatar(
-            radius: 19,
-            backgroundColor: AppTheme.primaryColor,
-            child: Text(
-              'MA',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -216,7 +182,6 @@ class _PatientsScreenState extends State<PatientsScreen> {
             ],
           ),
         ),
-
         ElevatedButton.icon(
           onPressed: _openCreatePatient,
           icon: const Icon(Icons.person_add_alt_1),
@@ -235,32 +200,16 @@ class _PatientsScreenState extends State<PatientsScreen> {
         Expanded(
           child: _buildStatCard(
             title: 'Total patients',
-            value: '1 248',
+            value: _loading ? '…' : '$_totalPatients',
             icon: Icons.people_outline,
           ),
         ),
         const SizedBox(width: 16),
         Expanded(
           child: _buildStatCard(
-            title: 'Nouveaux aujourd’hui',
-            value: '18',
-            icon: Icons.person_add_alt_1_outlined,
-          ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: _buildStatCard(
-            title: 'Dossiers actifs',
-            value: '1 196',
+            title: 'Résultats affichés',
+            value: _loading ? '…' : '${_patients.length}',
             icon: Icons.folder_open_outlined,
-          ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: _buildStatCard(
-            title: 'Prises en charge',
-            value: '34',
-            icon: Icons.medical_services_outlined,
           ),
         ),
       ],
@@ -321,8 +270,6 @@ class _PatientsScreenState extends State<PatientsScreen> {
   }
 
   Widget _buildPatientList() {
-    final patients = _filteredPatients;
-
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -350,7 +297,7 @@ class _PatientsScreenState extends State<PatientsScreen> {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  '${patients.length}',
+                  '${_patients.length}',
                   style: const TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
@@ -364,21 +311,15 @@ class _PatientsScreenState extends State<PatientsScreen> {
                 height: 42,
                 child: TextField(
                   controller: _searchController,
-                  onChanged: (value) {
-                    setState(() {
-                      _searchQuery = value;
-                    });
-                  },
+                  onChanged: _onSearchChanged,
                   decoration: InputDecoration(
                     hintText: 'Rechercher un patient...',
                     prefixIcon: const Icon(Icons.search, size: 20),
-                    suffixIcon: _searchQuery.isNotEmpty
+                    suffixIcon: _searchController.text.isNotEmpty
                         ? IconButton(
                             onPressed: () {
                               _searchController.clear();
-                              setState(() {
-                                _searchQuery = '';
-                              });
+                              _load();
                             },
                             icon: const Icon(Icons.close, size: 18),
                           )
@@ -388,13 +329,37 @@ class _PatientsScreenState extends State<PatientsScreen> {
               ),
             ],
           ),
-
           const SizedBox(height: 20),
-
-          if (patients.isEmpty)
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 40),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_error != null)
+            _buildErrorState()
+          else if (_patients.isEmpty)
             _buildEmptyState()
           else
-            _buildPatientsTable(patients),
+            _buildPatientsTable(_patients),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Padding(
+      padding: const EdgeInsets.all(30),
+      child: Column(
+        children: [
+          const Icon(Icons.error_outline, size: 40, color: Color(0xFFDC2626)),
+          const SizedBox(height: 12),
+          Text(
+            _error!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+          ),
+          const SizedBox(height: 12),
+          ElevatedButton(onPressed: _load, child: const Text('Réessayer')),
         ],
       ),
     );
@@ -424,15 +389,10 @@ class _PatientsScreenState extends State<PatientsScreen> {
                 flex: 2,
                 child: Text('TÉLÉPHONE', style: _tableHeaderStyle),
               ),
-              SizedBox(
-                width: 90,
-                child: Text('STATUT', style: _tableHeaderStyle),
-              ),
               SizedBox(width: 55, child: Text('', style: _tableHeaderStyle)),
             ],
           ),
         ),
-
         ...patients.map(_buildPatientRow),
       ],
     );
@@ -440,9 +400,7 @@ class _PatientsScreenState extends State<PatientsScreen> {
 
   Widget _buildPatientRow(Patient patient) {
     return InkWell(
-      onTap: () {
-        _showPatientDetails(patient);
-      },
+      onTap: () => _showPatientDetails(patient),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 15),
         decoration: const BoxDecoration(
@@ -453,7 +411,7 @@ class _PatientsScreenState extends State<PatientsScreen> {
             SizedBox(
               width: 125,
               child: Text(
-                patient.id,
+                patient.numeroDossier,
                 style: const TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
@@ -461,16 +419,13 @@ class _PatientsScreenState extends State<PatientsScreen> {
                 ),
               ),
             ),
-
             Expanded(
               flex: 2,
               child: Row(
                 children: [
                   CircleAvatar(
                     radius: 17,
-                    backgroundColor: AppTheme.primaryColor.withValues(
-                      alpha: 0.10,
-                    ),
+                    backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.10),
                     child: Text(
                       _initial(patient.prenom),
                       style: const TextStyle(
@@ -494,50 +449,26 @@ class _PatientsScreenState extends State<PatientsScreen> {
                 ],
               ),
             ),
-
             Expanded(
               child: Text(
-                '${patient.sexe} / ${patient.age} ans',
+                patient.age == null
+                    ? patient.sexeLabel
+                    : '${patient.sexeLabel} / ${patient.age} ans',
                 style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
               ),
             ),
-
             Expanded(
               flex: 2,
               child: Text(
-                patient.telephone,
+                patient.telephone ?? 'Non renseigné',
                 style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
               ),
             ),
-
-            SizedBox(
-              width: 90,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                decoration: BoxDecoration(
-                  color: _statusColor(patient.statut).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  patient.statut,
-                  textAlign: TextAlign.center,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                    color: _statusColor(patient.statut),
-                  ),
-                ),
-              ),
-            ),
-
             SizedBox(
               width: 55,
               child: IconButton(
                 tooltip: 'Voir le dossier',
-                onPressed: () {
-                  _showPatientDetails(patient);
-                },
+                onPressed: () => _showPatientDetails(patient),
                 icon: const Icon(Icons.arrow_forward_ios, size: 15),
               ),
             ),
@@ -572,28 +503,9 @@ class _PatientsScreenState extends State<PatientsScreen> {
     );
   }
 
-  Color _statusColor(String status) {
-    switch (status) {
-      case 'Nouveau':
-        return AppTheme.primaryColor;
-      case 'Inactif':
-        return const Color(0xFF94A3B8);
-      default:
-        return const Color(0xFF15803D);
-    }
-  }
-
   String _initial(String value) {
     final trimmed = value.trim();
     return trimmed.isEmpty ? '?' : trimmed.substring(0, 1).toUpperCase();
-  }
-
-  void _showPatientDetails(Patient patient) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => PatientDetailScreen(patient: patient),
-      ),
-    );
   }
 }
 

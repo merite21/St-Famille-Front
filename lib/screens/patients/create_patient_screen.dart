@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../models/patient.dart';
+import '../../services/api_exception.dart';
+import '../../services/patient_service.dart';
 
 class CreatePatientScreen extends StatefulWidget {
   const CreatePatientScreen({super.key});
@@ -68,26 +70,6 @@ class _CreatePatientScreenState extends State<CreatePatientScreen> {
     return '$day/$month/${date.year}';
   }
 
-  int _calculateAge(DateTime birthDate) {
-    final today = DateTime.now();
-
-    int age = today.year - birthDate.year;
-
-    if (today.month < birthDate.month ||
-        (today.month == birthDate.month &&
-            today.day < birthDate.day)) {
-      age--;
-    }
-
-    return age;
-  }
-
-  String _generatePatientId() {
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-
-    return 'SF-${timestamp.toString().substring(7)}';
-  }
-
   Future<void> _savePatient() async {
     if (!_formKey.currentState!.validate()) {
       return;
@@ -113,28 +95,34 @@ class _CreatePatientScreenState extends State<CreatePatientScreen> {
       _isSaving = true;
     });
 
-    // Simulation temporaire.
-    // Cette partie sera remplacée par l'appel à l'API REST PHP.
-    await Future.delayed(const Duration(seconds: 1));
-
-    final adresse = _adresseController.text.trim();
     final contactNom = _contactNomController.text.trim();
     final contactTelephone = _contactTelephoneController.text.trim();
 
-    final patient = Patient(
-      id: _generatePatientId(),
-      nom: _nomController.text.trim().toUpperCase(),
-      prenom: _prenomController.text.trim(),
-      sexe: _sexe!,
-      age: _calculateAge(_dateNaissance!),
-      telephone: _telephoneController.text.trim(),
-      statut: 'Nouveau',
-      dateNaissance: _dateNaissance,
-      adresse: adresse.isEmpty ? null : adresse,
-      contactNom: contactNom.isEmpty ? null : contactNom,
-      contactTelephone: contactTelephone.isEmpty ? null : contactTelephone,
-      lienContact: _lienContact,
-    );
+    final contactParts = [
+      if (contactNom.isNotEmpty) contactNom,
+      if (_lienContact != null) '($_lienContact)',
+      if (contactTelephone.isNotEmpty) contactTelephone,
+    ];
+
+    Patient patient;
+    try {
+      patient = await PatientService.instance.create(
+        nom: _nomController.text.trim().toUpperCase(),
+        prenom: _prenomController.text.trim(),
+        dateNaissance: _dateNaissance,
+        sexe: _sexe,
+        telephone: _telephoneController.text.trim(),
+        adresse: _adresseController.text.trim(),
+        contactUrgence: contactParts.isEmpty ? null : contactParts.join(' '),
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSaving = false;
+      });
+      _showMessage(e.message, isError: true);
+      return;
+    }
 
     if (!mounted) return;
 
@@ -481,11 +469,11 @@ class _CreatePatientScreenState extends State<CreatePatientScreen> {
           ),
           items: const [
             DropdownMenuItem(
-              value: 'Homme',
+              value: 'M',
               child: Text('Homme'),
             ),
             DropdownMenuItem(
-              value: 'Femme',
+              value: 'F',
               child: Text('Femme'),
             ),
           ],

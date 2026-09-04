@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../services/api_exception.dart';
+import '../../services/auth_service.dart';
 import '../dashboard/dashboard_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -17,7 +19,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _passwordController = TextEditingController();
 
   bool _obscurePassword = true;
-  bool _rememberMe = false;
   bool _isLoading = false;
 
   @override
@@ -36,9 +37,25 @@ class _LoginScreenState extends State<LoginScreen> {
       _isLoading = true;
     });
 
-    // Simulation temporaire de connexion.
-    // Plus tard, cette partie appellera l'API REST PHP.
-    await Future.delayed(const Duration(seconds: 1));
+    try {
+      await AuthService.instance.login(
+        _usernameController.text.trim(),
+        _passwordController.text,
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFFDC2626),
+        ),
+      );
+      return;
+    }
 
     if (!mounted) return;
 
@@ -98,7 +115,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 36),
 
                     const Text(
-                      'Identifiant',
+                      'Matricule',
                       style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w600,
@@ -110,15 +127,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
                     TextFormField(
                       controller: _usernameController,
-                      keyboardType: TextInputType.emailAddress,
+                      textCapitalization: TextCapitalization.characters,
                       textInputAction: TextInputAction.next,
                       decoration: const InputDecoration(
-                        hintText: 'Votre identifiant',
-                        prefixIcon: Icon(Icons.person_outline),
+                        hintText: 'Ex. ADM-001',
+                        prefixIcon: Icon(Icons.badge_outlined),
                       ),
                       validator: (value) {
                         if (value == null || value.trim().isEmpty) {
-                          return 'Veuillez saisir votre identifiant';
+                          return 'Veuillez saisir votre matricule';
                         }
 
                         return null;
@@ -167,10 +184,6 @@ class _LoginScreenState extends State<LoginScreen> {
                           return 'Veuillez saisir votre mot de passe';
                         }
 
-                        if (value.length < 4) {
-                          return 'Le mot de passe est trop court';
-                        }
-
                         return null;
                       },
                     ),
@@ -179,23 +192,6 @@ class _LoginScreenState extends State<LoginScreen> {
 
                     Row(
                       children: [
-                        Checkbox(
-                          value: _rememberMe,
-                          onChanged: (value) {
-                            setState(() {
-                              _rememberMe = value ?? false;
-                            });
-                          },
-                        ),
-
-                        const Text(
-                          'Se souvenir de moi',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Color(0xFF475569),
-                          ),
-                        ),
-
                         const Spacer(),
 
                         TextButton(

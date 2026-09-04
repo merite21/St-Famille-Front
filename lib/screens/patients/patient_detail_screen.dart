@@ -1,15 +1,133 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../models/dossier.dart';
 import '../../models/patient.dart';
+import '../../services/api_exception.dart';
+import '../../services/dossier_service.dart';
+import '../../services/patient_service.dart';
+import '../../widgets/status_pill.dart';
 
-class PatientDetailScreen extends StatelessWidget {
-  final Patient patient;
+class PatientDetailScreen extends StatefulWidget {
+  final int patientId;
 
   const PatientDetailScreen({
     super.key,
-    required this.patient,
+    required this.patientId,
   });
+
+  @override
+  State<PatientDetailScreen> createState() => _PatientDetailScreenState();
+}
+
+class _PatientDetailScreenState extends State<PatientDetailScreen> {
+  Patient? _patient;
+  List<Dossier> _dossiers = [];
+  bool _loading = true;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final results = await Future.wait([
+        PatientService.instance.getById(widget.patientId),
+        DossierService.instance.list(patientId: widget.patientId),
+      ]);
+
+      if (!mounted) return;
+
+      setState(() {
+        _patient = results[0] as Patient;
+        _dossiers = results[1] as List<Dossier>;
+        _loading = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _loading = false;
+      });
+    }
+  }
+
+  Future<void> _openNewDossierDialog() async {
+    final motifController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    bool isSaving = false;
+
+    final created = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            title: const Text('Ouvrir un nouveau dossier'),
+            content: Form(
+              key: formKey,
+              child: SizedBox(
+                width: 380,
+                child: TextFormField(
+                  controller: motifController,
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Motif (optionnel)',
+                    hintText: 'Ex. Consultation générale',
+                  ),
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isSaving ? null : () => Navigator.pop(context, false),
+                child: const Text('Annuler'),
+              ),
+              ElevatedButton(
+                onPressed: isSaving
+                    ? null
+                    : () async {
+                        setDialogState(() => isSaving = true);
+                        try {
+                          await DossierService.instance.create(
+                            patientId: widget.patientId,
+                            motif: motifController.text.trim(),
+                          );
+                          if (context.mounted) Navigator.pop(context, true);
+                        } on ApiException catch (e) {
+                          setDialogState(() => isSaving = false);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text(e.message)),
+                            );
+                          }
+                        }
+                      },
+                child: isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Ouvrir'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (created == true) {
+      _load();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,27 +137,51 @@ class PatientDetailScreen extends StatelessWidget {
         children: [
           _buildHeader(context),
           Expanded(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(28),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildBreadcrumb(context),
-                  const SizedBox(height: 22),
-                  _buildPatientHeader(),
-                  const SizedBox(height: 24),
-                  _buildInformationSection(),
-                  const SizedBox(height: 20),
-                  _buildContactSection(),
-                  const SizedBox(height: 20),
-                  _buildMedicalSection(),
-                  const SizedBox(height: 20),
-                  _buildHistorySection(),
-                ],
-              ),
-            ),
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? _buildErrorState()
+                    : SingleChildScrollView(
+                        padding: const EdgeInsets.all(28),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _buildBreadcrumb(context),
+                            const SizedBox(height: 22),
+                            _buildPatientHeader(),
+                            const SizedBox(height: 24),
+                            _buildInformationSection(),
+                            const SizedBox(height: 20),
+                            _buildContactSection(),
+                            const SizedBox(height: 20),
+                            _buildDossiersSection(),
+                          ],
+                        ),
+                      ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(30),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, size: 40, color: Color(0xFFDC2626)),
+            const SizedBox(height: 12),
+            Text(
+              _error!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(onPressed: _load, child: const Text('Réessayer')),
+          ],
+        ),
       ),
     );
   }
@@ -70,25 +212,6 @@ class PatientDetailScreen extends StatelessWidget {
               fontSize: 22,
               fontWeight: FontWeight.w700,
               color: Color(0xFF1E293B),
-            ),
-          ),
-          const Spacer(),
-          IconButton(
-            tooltip: 'Notifications',
-            onPressed: () {},
-            icon: const Icon(Icons.notifications_none_outlined),
-          ),
-          const SizedBox(width: 10),
-          const CircleAvatar(
-            radius: 19,
-            backgroundColor: AppTheme.primaryColor,
-            child: Text(
-              'MA',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
             ),
           ),
         ],
@@ -130,6 +253,8 @@ class PatientDetailScreen extends StatelessWidget {
   }
 
   Widget _buildPatientHeader() {
+    final patient = _patient!;
+
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -143,8 +268,7 @@ class PatientDetailScreen extends StatelessWidget {
         children: [
           CircleAvatar(
             radius: 34,
-            backgroundColor:
-                AppTheme.primaryColor.withValues(alpha: 0.10),
+            backgroundColor: AppTheme.primaryColor.withValues(alpha: 0.10),
             child: Text(
               _initial(patient.prenom),
               style: const TextStyle(
@@ -168,28 +292,31 @@ class PatientDetailScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 6),
-                Row(
+                Wrap(
+                  spacing: 18,
+                  runSpacing: 6,
                   children: [
-                    _buildSmallInfo(
-                      Icons.badge_outlined,
-                      patient.id,
-                    ),
-                    const SizedBox(width: 18),
+                    _buildSmallInfo(Icons.badge_outlined, patient.numeroDossier),
                     _buildSmallInfo(
                       Icons.person_outline,
-                      '${patient.sexe} • ${patient.age} ans',
+                      patient.age == null
+                          ? patient.sexeLabel
+                          : '${patient.sexeLabel} • ${patient.age} ans',
                     ),
-                    const SizedBox(width: 18),
                     _buildSmallInfo(
                       Icons.phone_outlined,
-                      patient.telephone,
+                      patient.telephone ?? 'Non renseigné',
                     ),
                   ],
                 ),
               ],
             ),
           ),
-          _buildStatusBadge(patient.statut),
+          ElevatedButton.icon(
+            onPressed: _openNewDossierDialog,
+            icon: const Icon(Icons.add, size: 18),
+            label: const Text('Nouveau dossier'),
+          ),
         ],
       ),
     );
@@ -202,6 +329,7 @@ class PatientDetailScreen extends StatelessWidget {
 
   Widget _buildSmallInfo(IconData icon, String text) {
     return Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Icon(
           icon,
@@ -220,41 +348,9 @@ class PatientDetailScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildStatusBadge(String status) {
-    final color = _statusColor(status);
-
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 13,
-        vertical: 7,
-      ),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        status,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: color,
-        ),
-      ),
-    );
-  }
-
-  Color _statusColor(String status) {
-    switch (status) {
-      case 'Nouveau':
-        return AppTheme.primaryColor;
-      case 'Inactif':
-        return const Color(0xFF94A3B8);
-      default:
-        return const Color(0xFF15803D);
-    }
-  }
-
   Widget _buildInformationSection() {
+    final patient = _patient!;
+
     return _buildSectionCard(
       title: 'Informations administratives',
       icon: Icons.person_outline,
@@ -262,28 +358,13 @@ class PatientDetailScreen extends StatelessWidget {
         children: [
           Row(
             children: [
-              Expanded(
-                child: _buildInfoItem(
-                  'Nom',
-                  patient.nom,
-                ),
-              ),
-              Expanded(
-                child: _buildInfoItem(
-                  'Prénom',
-                  patient.prenom,
-                ),
-              ),
-              Expanded(
-                child: _buildInfoItem(
-                  'Sexe',
-                  patient.sexe,
-                ),
-              ),
+              Expanded(child: _buildInfoItem('Nom', patient.nom)),
+              Expanded(child: _buildInfoItem('Prénom', patient.prenom)),
+              Expanded(child: _buildInfoItem('Sexe', patient.sexeLabel)),
               Expanded(
                 child: _buildInfoItem(
                   'Âge',
-                  '${patient.age} ans',
+                  patient.age == null ? 'À renseigner' : '${patient.age} ans',
                 ),
               ),
             ],
@@ -294,7 +375,7 @@ class PatientDetailScreen extends StatelessWidget {
               Expanded(
                 child: _buildInfoItem(
                   'Téléphone',
-                  patient.telephone,
+                  patient.telephone ?? 'À renseigner',
                 ),
               ),
               Expanded(
@@ -306,16 +387,10 @@ class PatientDetailScreen extends StatelessWidget {
                 ),
               ),
               Expanded(
-                child: _buildInfoItem(
-                  'Adresse',
-                  patient.adresse ?? 'À renseigner',
-                ),
+                child: _buildInfoItem('Adresse', patient.adresse ?? 'À renseigner'),
               ),
               Expanded(
-                child: _buildInfoItem(
-                  'N° dossier',
-                  patient.id,
-                ),
+                child: _buildInfoItem('N° dossier patient', patient.numeroDossier),
               ),
             ],
           ),
@@ -332,234 +407,56 @@ class PatientDetailScreen extends StatelessWidget {
   }
 
   Widget _buildContactSection() {
-    final hasContact = patient.contactNom != null ||
-        patient.contactTelephone != null;
+    final contact = _patient!.contactUrgence;
 
     return _buildSectionCard(
       title: 'Personne à contacter',
       icon: Icons.contact_phone_outlined,
-      child: hasContact
-          ? Row(
-              children: [
-                Expanded(
-                  child: _buildInfoItem(
-                    'Nom du contact',
-                    patient.contactNom ?? 'À renseigner',
-                  ),
-                ),
-                Expanded(
-                  child: _buildInfoItem(
-                    'Téléphone du contact',
-                    patient.contactTelephone ?? 'À renseigner',
-                  ),
-                ),
-                Expanded(
-                  child: _buildInfoItem(
-                    'Lien avec le patient',
-                    patient.lienContact ?? 'À renseigner',
-                  ),
-                ),
-                const Expanded(child: SizedBox.shrink()),
-              ],
-            )
-          : const Text(
+      child: (contact == null || contact.isEmpty)
+          ? const Text(
               'Aucune personne à contacter renseignée.',
               style: TextStyle(
                 fontSize: 13,
                 color: Color(0xFF64748B),
               ),
+            )
+          : Text(
+              contact,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF334155),
+              ),
             ),
     );
   }
 
-  Widget _buildMedicalSection() {
+  Widget _buildDossiersSection() {
     return _buildSectionCard(
-      title: 'Informations médicales',
-      icon: Icons.medical_information_outlined,
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: _buildMedicalCard(
-                  title: 'Dernière consultation',
-                  value: 'Aujourd’hui',
-                  icon: Icons.calendar_today_outlined,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildMedicalCard(
-                  title: 'Consultations',
-                  value: '8',
-                  icon: Icons.medical_services_outlined,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildMedicalCard(
-                  title: 'Soins réalisés',
-                  value: '5',
-                  icon: Icons.healing_outlined,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _buildMedicalCard(
-                  title: 'Statut actuel',
-                  value: 'Aucune prise en charge',
-                  icon: Icons.check_circle_outline,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              Expanded(
-                child: _buildInfoItem(
-                  'Groupe sanguin',
-                  'Non renseigné',
-                ),
-              ),
-              Expanded(
-                child: _buildInfoItem(
-                  'Allergies',
-                  'Non renseignées',
-                ),
-              ),
-              Expanded(
-                child: _buildInfoItem(
-                  'Antécédents',
-                  'Non renseignés',
-                ),
-              ),
-              Expanded(
-                child: _buildInfoItem(
-                  'Observations',
-                  'Aucune',
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMedicalCard({
-    required String title,
-    required String value,
-    required IconData icon,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: const Color(0xFFE2E8F0),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: AppTheme.primaryColor.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              icon,
-              size: 20,
-              color: AppTheme.primaryColor,
-            ),
-          ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 10,
-                    color: Color(0xFF64748B),
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF1E293B),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHistorySection() {
-    return _buildSectionCard(
-      title: 'Historique des prises en charge',
+      title: 'Historique des dossiers',
       icon: Icons.history,
-      child: Column(
-        children: [
-          _buildHistoryItem(
-            date: '28/08/2026',
-            type: 'Consultation médicale',
-            description:
-                'Consultation générale avec le médecin.',
-            status: 'Terminée',
-            icon: Icons.medical_services_outlined,
-          ),
-          _buildHistoryItem(
-            date: '15/08/2026',
-            type: 'Soin infirmier',
-            description:
-                'Soin réalisé en salle de soins 2.',
-            status: 'Terminé',
-            icon: Icons.healing_outlined,
-          ),
-          _buildHistoryItem(
-            date: '02/08/2026',
-            type: 'Consultation médicale',
-            description:
-                'Contrôle médical et suivi du patient.',
-            status: 'Terminée',
-            icon: Icons.medical_services_outlined,
-          ),
-        ],
-      ),
+      child: _dossiers.isEmpty
+          ? const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Aucun dossier ouvert pour ce patient.',
+                style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+              ),
+            )
+          : Column(
+              children: _dossiers.map(_buildDossierRow).toList(),
+            ),
     );
   }
 
-  Widget _buildHistoryItem({
-    required String date,
-    required String type,
-    required String description,
-    required String status,
-    required IconData icon,
-  }) {
+  Widget _buildDossierRow(Dossier dossier) {
+    final color = statusColor(dossier.statut);
+
     return Container(
-      padding: const EdgeInsets.symmetric(
-        vertical: 16,
-      ),
+      padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: const BoxDecoration(
         border: Border(
-          bottom: BorderSide(
-            color: Color(0xFFF1F5F9),
-          ),
+          bottom: BorderSide(color: Color(0xFFF1F5F9)),
         ),
       ),
       child: Row(
@@ -571,8 +468,8 @@ class PatientDetailScreen extends StatelessWidget {
               color: const Color(0xFFF1F5F9),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(
-              icon,
+            child: const Icon(
+              Icons.folder_open_outlined,
               size: 20,
               color: AppTheme.primaryColor,
             ),
@@ -584,7 +481,7 @@ class PatientDetailScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  type,
+                  dossier.motif?.isNotEmpty == true ? dossier.motif! : 'Dossier #${dossier.id}',
                   style: const TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
@@ -593,7 +490,7 @@ class PatientDetailScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  description,
+                  'Ouvert le ${_formatDate(dossier.ouvertAt)}',
                   style: const TextStyle(
                     fontSize: 12,
                     color: Color(0xFF64748B),
@@ -602,39 +499,8 @@ class PatientDetailScreen extends StatelessWidget {
               ],
             ),
           ),
-          SizedBox(
-            width: 110,
-            child: Text(
-              date,
-              style: const TextStyle(
-                fontSize: 11,
-                color: Color(0xFF64748B),
-              ),
-            ),
-          ),
-          _buildHistoryStatus(status),
+          StatusPill(label: statusLabel(dossier.statut), color: color),
         ],
-      ),
-    );
-  }
-
-  Widget _buildHistoryStatus(String status) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 10,
-        vertical: 5,
-      ),
-      decoration: BoxDecoration(
-        color: const Color(0xFFDCFCE7),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        status,
-        style: const TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-          color: Color(0xFF15803D),
-        ),
       ),
     );
   }
