@@ -32,12 +32,14 @@ class DemandeSoinController
                     t.libelle AS type_soin,
                     CONCAT(p.nom, ' ', p.prenom) AS patient_nom,
                     p.numero_dossier,
-                    CONCAT(m.nom, ' ', m.prenom) AS medecin_nom
+                    CONCAT(m.nom, ' ', m.prenom) AS medecin_nom,
+                    a.id AS attribution_id
              FROM demandes_soins ds
              JOIN types_soins t ON t.id = ds.type_soin_id
              JOIN dossiers d ON d.id = ds.dossier_id
              JOIN patients p ON p.id = d.patient_id
              JOIN users m ON m.id = ds.medecin_id
+             LEFT JOIN attributions_soins a ON a.demande_soin_id = ds.id
              $where
              ORDER BY FIELD(ds.priorite, 'urgente', 'normale'), ds.created_at ASC"
         );

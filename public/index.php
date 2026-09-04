@@ -93,6 +93,7 @@ $app->group('/v1', function ($group) {
     $group->get('/prestations', [PrestationController::class, 'list']);
 
     // --- Paiements ---
+    $group->get('/paiements', [PaiementController::class, 'list']);
     $group->post('/paiements', [PaiementController::class, 'create']);
     $group->get('/paiements/{id}', [PaiementController::class, 'show']);
     $group->put('/paiements/{id}/confirmer', [PaiementController::class, 'confirmer']);

@@ -96,7 +96,8 @@ class AttributionSoinController
                     ds.priorite, ds.instructions,
                     t.libelle AS type_soin,
                     CONCAT(p.nom, ' ', p.prenom) AS patient_nom, p.numero_dossier,
-                    CONCAT(m.nom, ' ', m.prenom) AS medecin_nom
+                    CONCAT(m.nom, ' ', m.prenom) AS medecin_nom,
+                    so.id AS soin_id
              FROM attributions_soins a
              JOIN demandes_soins ds ON ds.id = a.demande_soin_id
              JOIN types_soins t ON t.id = ds.type_soin_id
@@ -104,6 +105,7 @@ class AttributionSoinController
              JOIN patients p ON p.id = d.patient_id
              JOIN users m ON m.id = ds.medecin_id
              LEFT JOIN salles_soins s ON s.id = a.salle_soin_id
+             LEFT JOIN soins so ON so.attribution_id = a.id
              WHERE a.id = ?"
         );
         $stmt->execute([$args['id']]);
