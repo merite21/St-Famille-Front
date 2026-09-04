@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../auth/login_screen.dart';
 import '../patients/patients_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
@@ -143,19 +144,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     item: item,
                     selected: selected,
                     onTap: () {
-  if (index == 1) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const PatientsScreen(),
-      ),
-    );
-    return;
-  }
+                      if (index == 1) {
+                        _openPatients();
+                        return;
+                      }
 
-  setState(() {
-    _selectedIndex = index;
-  });
-},
+                      _selectMenuIndex(index);
+                    },
                   ),
                 );
               },
@@ -217,7 +212,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 IconButton(
                   tooltip: 'Déconnexion',
                   onPressed: () {
-                    Navigator.of(context).pop();
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(
+                        builder: (context) => const LoginScreen(),
+                      ),
+                      (route) => false,
+                    );
                   },
                   icon: const Icon(
                     Icons.logout_outlined,
@@ -280,6 +280,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+  void _selectMenuIndex(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+  }
+
+  void _openPatients() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const PatientsScreen(),
+      ),
+    );
+  }
+
   Widget _buildMainContent() {
     return Column(
       children: [
@@ -287,10 +301,65 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(28),
-            child: _buildDashboardBody(),
+            child: _selectedIndex == 0
+                ? _buildDashboardBody()
+                : _buildPlaceholderBody(_menuItems[_selectedIndex]),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildPlaceholderBody(_MenuItem item) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: AppTheme.primaryColor.withValues(alpha: 0.10),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              item.icon,
+              size: 34,
+              color: AppTheme.primaryColor,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            item.title,
+            style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: Color(0xFF1E293B),
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Ce module est en cours de développement et sera bientôt disponible.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 13,
+              color: Color(0xFF64748B),
+            ),
+          ),
+          const SizedBox(height: 20),
+          TextButton.icon(
+            onPressed: () => _selectMenuIndex(0),
+            icon: const Icon(Icons.arrow_back, size: 18),
+            label: const Text('Retour au tableau de bord'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -566,7 +635,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return _buildSectionCard(
       title: 'File d’attente',
       trailing: TextButton(
-        onPressed: () {},
+        onPressed: () => _selectMenuIndex(4),
         child: const Text('Voir tout'),
       ),
       child: Column(
@@ -706,21 +775,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: Icons.person_add_alt_1_outlined,
             title: 'Nouveau patient',
             subtitle: 'Créer un dossier patient',
+            onTap: _openPatients,
           ),
           _buildQuickAction(
             icon: Icons.search,
             title: 'Rechercher un patient',
             subtitle: 'Ouvrir un dossier existant',
+            onTap: _openPatients,
           ),
           _buildQuickAction(
             icon: Icons.queue_outlined,
             title: 'File d’attente',
             subtitle: 'Gérer les patients en attente',
+            onTap: () => _selectMenuIndex(4),
           ),
           _buildQuickAction(
             icon: Icons.medical_services_outlined,
             title: 'Soins infirmiers',
             subtitle: 'Voir les demandes de soins',
+            onTap: () => _selectMenuIndex(6),
           ),
         ],
       ),
@@ -731,9 +804,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     required IconData icon,
     required String title,
     required String subtitle,
+    required VoidCallback onTap,
   }) {
     return InkWell(
-      onTap: () {},
+      onTap: onTap,
       borderRadius: BorderRadius.circular(10),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 10),

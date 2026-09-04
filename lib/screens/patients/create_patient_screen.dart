@@ -117,6 +117,10 @@ class _CreatePatientScreenState extends State<CreatePatientScreen> {
     // Cette partie sera remplacée par l'appel à l'API REST PHP.
     await Future.delayed(const Duration(seconds: 1));
 
+    final adresse = _adresseController.text.trim();
+    final contactNom = _contactNomController.text.trim();
+    final contactTelephone = _contactTelephoneController.text.trim();
+
     final patient = Patient(
       id: _generatePatientId(),
       nom: _nomController.text.trim().toUpperCase(),
@@ -125,6 +129,11 @@ class _CreatePatientScreenState extends State<CreatePatientScreen> {
       age: _calculateAge(_dateNaissance!),
       telephone: _telephoneController.text.trim(),
       statut: 'Nouveau',
+      dateNaissance: _dateNaissance,
+      adresse: adresse.isEmpty ? null : adresse,
+      contactNom: contactNom.isEmpty ? null : contactNom,
+      contactTelephone: contactTelephone.isEmpty ? null : contactTelephone,
+      lienContact: _lienContact,
     );
 
     if (!mounted) return;

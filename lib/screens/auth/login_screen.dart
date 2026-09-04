@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../dashboard/dashboard_screen.dart';
+
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
 
@@ -26,32 +27,32 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-Future<void> _login() async {
-  if (!_formKey.currentState!.validate()) {
-    return;
+  Future<void> _login() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    // Simulation temporaire de connexion.
+    // Plus tard, cette partie appellera l'API REST PHP.
+    await Future.delayed(const Duration(seconds: 1));
+
+    if (!mounted) return;
+
+    setState(() {
+      _isLoading = false;
+    });
+
+    // Navigation vers le tableau de bord.
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(
+        builder: (context) => const DashboardScreen(),
+      ),
+    );
   }
-
-  setState(() {
-    _isLoading = true;
-  });
-
-  // Simulation temporaire de connexion.
-  // Plus tard, cette partie appellera l'API REST PHP.
-  await Future.delayed(const Duration(seconds: 1));
-
-  if (!mounted) return;
-
-  setState(() {
-    _isLoading = false;
-  });
-
-  // Navigation vers le tableau de bord.
-  Navigator.of(context).pushReplacement(
-    MaterialPageRoute(
-      builder: (context) => const DashboardScreen(),
-    ),
-  );
-}
 
   @override
   Widget build(BuildContext context) {

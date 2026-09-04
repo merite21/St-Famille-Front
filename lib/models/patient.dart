@@ -6,6 +6,11 @@ class Patient {
   final int age;
   final String telephone;
   final String statut;
+  final DateTime? dateNaissance;
+  final String? adresse;
+  final String? contactNom;
+  final String? contactTelephone;
+  final String? lienContact;
 
   const Patient({
     required this.id,
@@ -15,5 +20,10 @@ class Patient {
     required this.age,
     required this.telephone,
     required this.statut,
+    this.dateNaissance,
+    this.adresse,
+    this.contactNom,
+    this.contactTelephone,
+    this.lienContact,
   });
 }

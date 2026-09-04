@@ -150,6 +150,12 @@ class _PatientsScreenState extends State<PatientsScreen> {
       ),
       child: Row(
         children: [
+          IconButton(
+            tooltip: 'Retour',
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.arrow_back),
+          ),
+          const SizedBox(width: 8),
           const Text(
             'Patients',
             style: TextStyle(
@@ -466,7 +472,7 @@ class _PatientsScreenState extends State<PatientsScreen> {
                       alpha: 0.10,
                     ),
                     child: Text(
-                      patient.prenom.substring(0, 1),
+                      _initial(patient.prenom),
                       style: const TextStyle(
                         color: AppTheme.primaryColor,
                         fontWeight: FontWeight.w700,
@@ -509,16 +515,17 @@ class _PatientsScreenState extends State<PatientsScreen> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFDCFCE7),
+                  color: _statusColor(patient.statut).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Text(
-                  'Actif',
+                child: Text(
+                  patient.statut,
                   textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w600,
-                    color: Color(0xFF15803D),
+                    color: _statusColor(patient.statut),
                   ),
                 ),
               ),
@@ -563,6 +570,22 @@ class _PatientsScreenState extends State<PatientsScreen> {
         ],
       ),
     );
+  }
+
+  Color _statusColor(String status) {
+    switch (status) {
+      case 'Nouveau':
+        return AppTheme.primaryColor;
+      case 'Inactif':
+        return const Color(0xFF94A3B8);
+      default:
+        return const Color(0xFF15803D);
+    }
+  }
+
+  String _initial(String value) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? '?' : trimmed.substring(0, 1).toUpperCase();
   }
 
   void _showPatientDetails(Patient patient) {
