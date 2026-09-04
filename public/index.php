@@ -6,6 +6,7 @@ use App\Controllers\AuthController;
 use App\Controllers\PatientController;
 use App\Controllers\DossierController;
 use App\Controllers\ConstantesController;
+use App\Controllers\PrestationController;
 use App\Controllers\PaiementController;
 use App\Controllers\FileAttenteController;
 use App\Controllers\ConsultationController;
@@ -15,6 +16,7 @@ use App\Controllers\SoinController;
 use App\Controllers\SalleSoinController;
 use App\Controllers\PlanningController;
 use App\Controllers\GardeController;
+use App\Controllers\RoleController;
 use App\Controllers\UserController;
 use App\Controllers\NotificationController;
 use App\Middleware\JwtMiddleware;
@@ -25,20 +27,41 @@ $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
 $dotenv->load();
 
 $app = AppFactory::create();
-$app->setBasePath('/Sainte_Famille/public');
+
+// Sur un hébergement classique, public/ est directement la racine web :
+// aucun préfixe n'est nécessaire (APP_BASE_PATH vide, comportement par
+// défaut). Ne renseigne APP_BASE_PATH que si l'API est servie depuis un
+// sous-dossier (ex. XAMPP : /Sainte_Famille/public).
+$basePath = $_ENV['APP_BASE_PATH'] ?? '';
+if ($basePath !== '') {
+    $app->setBasePath($basePath);
+}
+
+$debug = filter_var($_ENV['APP_DEBUG'] ?? 'false', FILTER_VALIDATE_BOOLEAN);
+
+$app->addBodyParsingMiddleware();
+$app->addErrorMiddleware($debug, $debug, $debug);
 
 // Permet à Flutter (autre origine) d'appeler l'API depuis le navigateur/l'appli.
-// En développement on autorise tout ("*"); à restreindre en production.
+// Ajoutée en DERNIER (donc la plus extérieure de la pile) pour que les en-têtes
+// CORS soient présents même sur les réponses d'erreur (404, 500...) : sinon le
+// navigateur bloque la réponse d'erreur elle-même avant qu'elle n'atteigne le
+// code JS/Flutter, masquant le vrai message d'erreur derrière une erreur CORS.
 $app->add(function ($request, $handler) {
     $response = $handler->handle($request);
     return $response
-        ->withHeader('Access-Control-Allow-Origin', '*')
+        ->withHeader('Access-Control-Allow-Origin', $_ENV['CORS_ALLOW_ORIGIN'] ?? '*')
         ->withHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
         ->withHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
 });
 
-$app->addBodyParsingMiddleware();
-$app->addErrorMiddleware(true, true, true); // à mettre (false,false,false) en production
+// Répond directement aux requêtes de pré-vérification CORS (preflight) que le
+// navigateur envoie avant tout POST/PUT avec un corps JSON ou un header
+// Authorization, pour toutes les routes — sans cette route, ces OPTIONS
+// tombaient en 404 avant même d'atteindre le middleware CORS ci-dessus.
+$app->options('/{routes:.+}', function ($request, $response) {
+    return $response;
+});
 
 // ---------------------------------------------------------------
 // Routes PUBLIQUES (pas besoin d'être connecté)
@@ -58,11 +81,15 @@ $app->group('/v1', function ($group) {
     $group->put('/patients/{id}', [PatientController::class, 'update']);
 
     // --- Dossiers ---
+    $group->get('/dossiers', [DossierController::class, 'list']);
     $group->post('/dossiers', [DossierController::class, 'create']);
     $group->get('/dossiers/{id}', [DossierController::class, 'show']);
 
     // --- Constantes ---
     $group->post('/dossiers/{id}/constantes', [ConstantesController::class, 'create']);
+
+    // --- Prestations ---
+    $group->get('/prestations', [PrestationController::class, 'list']);
 
     // --- Paiements ---
     $group->post('/paiements', [PaiementController::class, 'create']);
@@ -96,6 +123,7 @@ $app->group('/v1', function ($group) {
     $group->put('/gardes/{id}', [GardeController::class, 'update']);
 
     // --- Administration ---
+    $group->get('/roles', [RoleController::class, 'list']);
     $group->get('/users', [UserController::class, 'list']);
     $group->post('/users', [UserController::class, 'create']);
     $group->put('/users/{id}', [UserController::class, 'update']);
