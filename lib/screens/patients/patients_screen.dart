@@ -150,6 +150,12 @@ class _PatientsScreenState extends State<PatientsScreen> {
       ),
       child: Row(
         children: [
+          IconButton(
+            tooltip: 'Retour',
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.arrow_back),
+          ),
+          const SizedBox(width: 8),
           const Text(
             'Patients',
             style: TextStyle(
