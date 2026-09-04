@@ -14,6 +14,7 @@ use App\Controllers\DemandeSoinController;
 use App\Controllers\AttributionSoinController;
 use App\Controllers\SoinController;
 use App\Controllers\SalleSoinController;
+use App\Controllers\TypeSoinController;
 use App\Controllers\PlanningController;
 use App\Controllers\GardeController;
 use App\Controllers\RoleController;
@@ -102,6 +103,7 @@ $app->group('/v1', function ($group) {
     $group->put('/file-attente/{id}', [FileAttenteController::class, 'update']);
 
     // --- Consultations ---
+    $group->get('/consultations', [ConsultationController::class, 'list']);
     $group->post('/consultations', [ConsultationController::class, 'create']);
     $group->get('/consultations/{id}', [ConsultationController::class, 'show']);
     $group->put('/consultations/{id}', [ConsultationController::class, 'update']);
@@ -114,6 +116,7 @@ $app->group('/v1', function ($group) {
     $group->put('/attributions-soins/{id}', [AttributionSoinController::class, 'update']);
     $group->put('/soins/{id}', [SoinController::class, 'update']);
     $group->get('/salles-soins', [SalleSoinController::class, 'list']);
+    $group->get('/types-soins', [TypeSoinController::class, 'list']);
 
     // --- Plannings / Gardes ---
     $group->get('/plannings', [PlanningController::class, 'list']);
