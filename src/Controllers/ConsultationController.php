@@ -26,6 +26,18 @@ class ConsultationController
 
         $pdo = Database::getConnection();
 
+        $dossier = $pdo->prepare('SELECT id FROM dossiers WHERE id = ?');
+        $dossier->execute([$body['dossier_id']]);
+        if (!$dossier->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Dossier introuvable.', 404);
+        }
+
+        $medecin = $pdo->prepare('SELECT id FROM users WHERE id = ?');
+        $medecin->execute([$body['medecin_id']]);
+        if (!$medecin->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Médecin introuvable.', 404);
+        }
+
         $stmt = $pdo->prepare(
             'INSERT INTO consultations (dossier_id, medecin_id, motif, observations, diagnostic, orientation, debut_at)
              VALUES (?, ?, ?, ?, ?, ?, NOW())'

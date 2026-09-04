@@ -39,6 +39,12 @@ class UserController
 
         $pdo = Database::getConnection();
 
+        $role = $pdo->prepare('SELECT id FROM roles WHERE id = ?');
+        $role->execute([$body['role_id']]);
+        if (!$role->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Rôle introuvable.', 404);
+        }
+
         $stmt = $pdo->prepare(
             'INSERT INTO users (role_id, matricule, nom, prenom, email, telephone, password_hash, actif, created_at)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())'

@@ -50,6 +50,12 @@ class GardeController
 
         $pdo = Database::getConnection();
 
+        $user = $pdo->prepare('SELECT id FROM users WHERE id = ?');
+        $user->execute([$body['user_id']]);
+        if (!$user->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Utilisateur introuvable.', 404);
+        }
+
         try {
             $stmt = $pdo->prepare(
                 'INSERT INTO gardes (user_id, date_garde, type_garde, statut, created_at)

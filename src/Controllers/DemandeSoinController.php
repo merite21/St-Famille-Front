@@ -61,6 +61,24 @@ class DemandeSoinController
 
         $pdo = Database::getConnection();
 
+        $dossier = $pdo->prepare('SELECT id FROM dossiers WHERE id = ?');
+        $dossier->execute([$body['dossier_id']]);
+        if (!$dossier->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Dossier introuvable.', 404);
+        }
+
+        $typeSoin = $pdo->prepare('SELECT id FROM types_soins WHERE id = ?');
+        $typeSoin->execute([$body['type_soin_id']]);
+        if (!$typeSoin->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Type de soin introuvable.', 404);
+        }
+
+        $medecin = $pdo->prepare('SELECT id FROM users WHERE id = ?');
+        $medecin->execute([$body['medecin_id']]);
+        if (!$medecin->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Médecin introuvable.', 404);
+        }
+
         $stmt = $pdo->prepare(
             'INSERT INTO demandes_soins
                 (dossier_id, consultation_id, type_soin_id, medecin_id, priorite, instructions, statut, created_at)

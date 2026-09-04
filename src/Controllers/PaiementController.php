@@ -26,6 +26,12 @@ class PaiementController
 
         $pdo = Database::getConnection();
 
+        $dossier = $pdo->prepare('SELECT id FROM dossiers WHERE id = ?');
+        $dossier->execute([$body['dossier_id']]);
+        if (!$dossier->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Dossier introuvable.', 404);
+        }
+
         $prestation = $pdo->prepare('SELECT montant_fcfa FROM prestations WHERE id = ? AND actif = 1');
         $prestation->execute([$body['prestation_id']]);
         $prestationRow = $prestation->fetch();

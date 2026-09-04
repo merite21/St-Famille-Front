@@ -42,6 +42,20 @@ class AttributionSoinController
             return JsonResponse::error($response, 'already_attributed', 'Cette demande a déjà été traitée.', 409);
         }
 
+        $infirmier = $pdo->prepare('SELECT id FROM users WHERE id = ?');
+        $infirmier->execute([$body['infirmier_id']]);
+        if (!$infirmier->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Infirmier introuvable.', 404);
+        }
+
+        if (!empty($body['salle_soin_id'])) {
+            $salle = $pdo->prepare('SELECT id FROM salles_soins WHERE id = ?');
+            $salle->execute([$body['salle_soin_id']]);
+            if (!$salle->fetch()) {
+                return JsonResponse::error($response, 'not_found', 'Salle de soins introuvable.', 404);
+            }
+        }
+
         $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare(
