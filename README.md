@@ -59,7 +59,7 @@ INSERT INTO users (role_id, matricule, nom, prenom, password_hash, actif)
 VALUES (
   (SELECT id FROM roles WHERE nom = 'administrateur'),
   'ADM-001', 'Doe', 'Jane',
-  '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', -- = "test1234"
+  '$2y$12$BNxXS9BSlXAen.0KZasfTe6gj3UJGvh.tVxbVDSmD7OWh05DNrMI6', -- = "test1234"
   1
 );
 ```

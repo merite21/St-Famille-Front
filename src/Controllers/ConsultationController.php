@@ -9,6 +9,43 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 class ConsultationController
 {
+    /** GET /consultations?dossier_id=...&medecin_id=... */
+    public function list(Request $request, Response $response): Response
+    {
+        $pdo = Database::getConnection();
+        $params = $request->getQueryParams();
+
+        $where = [];
+        $bindings = [];
+
+        if (!empty($params['dossier_id'])) {
+            $where[] = 'c.dossier_id = ?';
+            $bindings[] = $params['dossier_id'];
+        }
+        if (!empty($params['medecin_id'])) {
+            $where[] = 'c.medecin_id = ?';
+            $bindings[] = $params['medecin_id'];
+        }
+
+        $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+
+        $stmt = $pdo->prepare(
+            "SELECT c.*,
+                    CONCAT(p.nom, ' ', p.prenom) AS patient_nom,
+                    p.numero_dossier,
+                    CONCAT(m.nom, ' ', m.prenom) AS medecin_nom
+             FROM consultations c
+             JOIN dossiers d ON d.id = c.dossier_id
+             JOIN patients p ON p.id = d.patient_id
+             JOIN users m ON m.id = c.medecin_id
+             $whereSql
+             ORDER BY c.debut_at DESC"
+        );
+        $stmt->execute($bindings);
+
+        return JsonResponse::send($response, $stmt->fetchAll());
+    }
+
     /** POST /consultations */
     public function create(Request $request, Response $response): Response
     {
@@ -25,6 +62,18 @@ class ConsultationController
         }
 
         $pdo = Database::getConnection();
+
+        $dossier = $pdo->prepare('SELECT id FROM dossiers WHERE id = ?');
+        $dossier->execute([$body['dossier_id']]);
+        if (!$dossier->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Dossier introuvable.', 404);
+        }
+
+        $medecin = $pdo->prepare('SELECT id FROM users WHERE id = ?');
+        $medecin->execute([$body['medecin_id']]);
+        if (!$medecin->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Médecin introuvable.', 404);
+        }
 
         $stmt = $pdo->prepare(
             'INSERT INTO consultations (dossier_id, medecin_id, motif, observations, diagnostic, orientation, debut_at)

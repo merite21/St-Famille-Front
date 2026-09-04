@@ -32,12 +32,14 @@ class DemandeSoinController
                     t.libelle AS type_soin,
                     CONCAT(p.nom, ' ', p.prenom) AS patient_nom,
                     p.numero_dossier,
-                    CONCAT(m.nom, ' ', m.prenom) AS medecin_nom
+                    CONCAT(m.nom, ' ', m.prenom) AS medecin_nom,
+                    a.id AS attribution_id
              FROM demandes_soins ds
              JOIN types_soins t ON t.id = ds.type_soin_id
              JOIN dossiers d ON d.id = ds.dossier_id
              JOIN patients p ON p.id = d.patient_id
              JOIN users m ON m.id = ds.medecin_id
+             LEFT JOIN attributions_soins a ON a.demande_soin_id = ds.id
              $where
              ORDER BY FIELD(ds.priorite, 'urgente', 'normale'), ds.created_at ASC"
         );
@@ -60,6 +62,24 @@ class DemandeSoinController
         }
 
         $pdo = Database::getConnection();
+
+        $dossier = $pdo->prepare('SELECT id FROM dossiers WHERE id = ?');
+        $dossier->execute([$body['dossier_id']]);
+        if (!$dossier->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Dossier introuvable.', 404);
+        }
+
+        $typeSoin = $pdo->prepare('SELECT id FROM types_soins WHERE id = ?');
+        $typeSoin->execute([$body['type_soin_id']]);
+        if (!$typeSoin->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Type de soin introuvable.', 404);
+        }
+
+        $medecin = $pdo->prepare('SELECT id FROM users WHERE id = ?');
+        $medecin->execute([$body['medecin_id']]);
+        if (!$medecin->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Médecin introuvable.', 404);
+        }
 
         $stmt = $pdo->prepare(
             'INSERT INTO demandes_soins

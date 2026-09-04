@@ -215,6 +215,8 @@ CREATE TABLE attributions_soins (
     infirmier_id        INT UNSIGNED NOT NULL,
     salle_soin_id       INT UNSIGNED NULL,
     attribue_par        INT UNSIGNED NOT NULL,       -- infirmier responsable / utilisateur habilité
+    statut              ENUM('attribue','en_cours','termine','reporte','annule','patient_absent')
+                        NOT NULL DEFAULT 'attribue',
     attribue_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (demande_soin_id) REFERENCES demandes_soins(id) ON DELETE CASCADE,
     FOREIGN KEY (infirmier_id) REFERENCES users(id),
@@ -313,3 +315,17 @@ INSERT INTO roles (nom, description) VALUES
 
 INSERT INTO prestations (code, libelle, montant_fcfa) VALUES
     ('CONSULT_GEN', 'Consultation générale', 7000);
+
+-- Sans ces deux tables peuplées, tout le circuit "soins infirmiers"
+-- (demandes-soins, attributions-soins) est inutilisable : la création
+-- d'une demande de soins référence obligatoirement un type_soin_id.
+INSERT INTO types_soins (libelle) VALUES
+    ('Pansement'),
+    ('Injection'),
+    ('Perfusion'),
+    ('Prise de constantes'),
+    ('Autre');
+
+INSERT INTO salles_soins (nom) VALUES
+    ('Salle de soins 1'),
+    ('Salle de soins 2');

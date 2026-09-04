@@ -13,6 +13,40 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 class DossierController
 {
+    /** GET /dossiers?patient_id=...&statut=... */
+    public function list(Request $request, Response $response): Response
+    {
+        $pdo = Database::getConnection();
+        $params = $request->getQueryParams();
+
+        $where = [];
+        $bindings = [];
+
+        if (!empty($params['patient_id'])) {
+            $where[] = 'd.patient_id = ?';
+            $bindings[] = $params['patient_id'];
+        }
+        if (!empty($params['statut'])) {
+            $where[] = 'd.statut = ?';
+            $bindings[] = $params['statut'];
+        }
+
+        $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+
+        $stmt = $pdo->prepare(
+            "SELECT
+                d.id, d.statut, d.motif, d.ouvert_at, d.cloture_at,
+                p.id AS patient_id, p.numero_dossier, p.nom, p.prenom
+             FROM dossiers d
+             JOIN patients p ON p.id = d.patient_id
+             $whereSql
+             ORDER BY d.ouvert_at DESC"
+        );
+        $stmt->execute($bindings);
+
+        return JsonResponse::send($response, $stmt->fetchAll());
+    }
+
     /** POST /dossiers */
     public function create(Request $request, Response $response): Response
     {

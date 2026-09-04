@@ -60,6 +60,12 @@ class PlanningController
 
         $pdo = Database::getConnection();
 
+        $user = $pdo->prepare('SELECT id FROM users WHERE id = ?');
+        $user->execute([$body['user_id']]);
+        if (!$user->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Utilisateur introuvable.', 404);
+        }
+
         $stmt = $pdo->prepare(
             'INSERT INTO plannings (user_id, date_debut, date_fin, service, created_by, created_at)
              VALUES (?, ?, ?, ?, ?, NOW())'

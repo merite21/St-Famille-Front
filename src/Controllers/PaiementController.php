@@ -9,6 +9,43 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 class PaiementController
 {
+    /** GET /paiements?statut=...&dossier_id=... */
+    public function list(Request $request, Response $response): Response
+    {
+        $pdo = Database::getConnection();
+        $params = $request->getQueryParams();
+
+        $where = [];
+        $bindings = [];
+
+        if (!empty($params['statut'])) {
+            $where[] = 'pa.statut = ?';
+            $bindings[] = $params['statut'];
+        }
+        if (!empty($params['dossier_id'])) {
+            $where[] = 'pa.dossier_id = ?';
+            $bindings[] = $params['dossier_id'];
+        }
+
+        $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+
+        $stmt = $pdo->prepare(
+            "SELECT pa.*,
+                    CONCAT(p.nom, ' ', p.prenom) AS patient_nom,
+                    p.numero_dossier,
+                    pr.libelle AS prestation_libelle
+             FROM paiements pa
+             JOIN dossiers d ON d.id = pa.dossier_id
+             JOIN patients p ON p.id = d.patient_id
+             JOIN prestations pr ON pr.id = pa.prestation_id
+             $whereSql
+             ORDER BY pa.demande_at DESC"
+        );
+        $stmt->execute($bindings);
+
+        return JsonResponse::send($response, $stmt->fetchAll());
+    }
+
     /** POST /paiements — créer une demande de paiement */
     public function create(Request $request, Response $response): Response
     {
@@ -25,6 +62,12 @@ class PaiementController
         }
 
         $pdo = Database::getConnection();
+
+        $dossier = $pdo->prepare('SELECT id FROM dossiers WHERE id = ?');
+        $dossier->execute([$body['dossier_id']]);
+        if (!$dossier->fetch()) {
+            return JsonResponse::error($response, 'not_found', 'Dossier introuvable.', 404);
+        }
 
         $prestation = $pdo->prepare('SELECT montant_fcfa FROM prestations WHERE id = ? AND actif = 1');
         $prestation->execute([$body['prestation_id']]);
