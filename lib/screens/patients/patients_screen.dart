@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../data/patient_directory.dart';
 import '../../models/patient.dart';
 import 'patient_detail_screen.dart';
 import 'create_patient_screen.dart';
@@ -17,53 +18,7 @@ class _PatientsScreenState extends State<PatientsScreen> {
 
   String _searchQuery = '';
 
-  final List<Patient> _patients = [
-    Patient(
-      id: 'SF-2026-0001',
-      nom: 'ADEKUNLE',
-      prenom: 'Jean',
-      sexe: 'Homme',
-      age: 34,
-      telephone: '97 00 00 01',
-      statut: 'Actif',
-    ),
-    Patient(
-      id: 'SF-2026-0002',
-      nom: 'AHOYO',
-      prenom: 'Marie',
-      sexe: 'Femme',
-      age: 28,
-      telephone: '96 00 00 02',
-      statut: 'Actif',
-    ),
-    Patient(
-      id: 'SF-2026-0003',
-      nom: 'ASSOGBA',
-      prenom: 'Paul',
-      sexe: 'Homme',
-      age: 46,
-      telephone: '95 00 00 03',
-      statut: 'Actif',
-    ),
-    Patient(
-      id: 'SF-2026-0004',
-      nom: 'GBETO',
-      prenom: 'Grâce',
-      sexe: 'Femme',
-      age: 39,
-      telephone: '94 00 00 04',
-      statut: 'Actif',
-    ),
-    Patient(
-      id: 'SF-2026-0005',
-      nom: 'HOUNKPE',
-      prenom: 'David',
-      sexe: 'Homme',
-      age: 51,
-      telephone: '90 00 00 05',
-      statut: 'Actif',
-    ),
-  ];
+  late final List<Patient> _patients = List.of(PatientDirectory.all);
 
   Future<void> _openCreatePatient() async {
     final patient = await Navigator.of(context).push<Patient>(
@@ -75,6 +30,7 @@ class _PatientsScreenState extends State<PatientsScreen> {
     }
 
     setState(() {
+      PatientDirectory.add(patient);
       _patients.insert(0, patient);
     });
 

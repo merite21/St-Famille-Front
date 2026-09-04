@@ -1,8 +1,18 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../data/queue_directory.dart';
+import '../../models/prise_en_charge.dart';
+import '../../widgets/status_pill.dart';
+import '../administration/administration_screen.dart';
 import '../auth/login_screen.dart';
+import '../consultations/consultations_screen.dart';
+import '../paiements/paiements_screen.dart';
 import '../patients/patients_screen.dart';
+import '../planning/planning_screen.dart';
+import '../reception/file_attente_screen.dart';
+import '../reception/reception_screen.dart';
+import '../soins/soins_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -12,7 +22,7 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  int _selectedIndex = 0;
+  final int _selectedIndex = 0;
 
   final List<_MenuItem> _menuItems = const [
     _MenuItem(
@@ -144,12 +154,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     item: item,
                     selected: selected,
                     onTap: () {
-                      if (index == 1) {
-                        _openPatients();
-                        return;
-                      }
-
-                      _selectMenuIndex(index);
+                      if (index == 0) return;
+                      _openModule(index);
                     },
                   ),
                 );
@@ -280,17 +286,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _selectMenuIndex(int index) {
-    setState(() {
-      _selectedIndex = index;
-    });
-  }
+  /// Ouvre l'écran du module correspondant à l'entrée sélectionnée dans
+  /// le menu latéral (l'index 0, Tableau de bord, reste sur cet écran).
+  void _openModule(int index) {
+    final Widget screen;
 
-  void _openPatients() {
+    switch (index) {
+      case 1:
+        screen = const PatientsScreen();
+        break;
+      case 2:
+        screen = const ReceptionScreen();
+        break;
+      case 3:
+        screen = const PaiementsScreen();
+        break;
+      case 4:
+        screen = const FileAttenteScreen();
+        break;
+      case 5:
+        screen = const ConsultationsScreen();
+        break;
+      case 6:
+        screen = const SoinsScreen();
+        break;
+      case 7:
+        screen = const PlanningScreen();
+        break;
+      case 8:
+        screen = const AdministrationScreen();
+        break;
+      default:
+        return;
+    }
+
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (context) => const PatientsScreen(),
-      ),
+      MaterialPageRoute(builder: (context) => screen),
     );
   }
 
@@ -301,65 +332,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
         Expanded(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(28),
-            child: _selectedIndex == 0
-                ? _buildDashboardBody()
-                : _buildPlaceholderBody(_menuItems[_selectedIndex]),
+            child: _buildDashboardBody(),
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildPlaceholderBody(_MenuItem item) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 60, horizontal: 24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Column(
-        children: [
-          Container(
-            width: 72,
-            height: 72,
-            decoration: BoxDecoration(
-              color: AppTheme.primaryColor.withValues(alpha: 0.10),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              item.icon,
-              size: 34,
-              color: AppTheme.primaryColor,
-            ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            item.title,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
-              color: Color(0xFF1E293B),
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Ce module est en cours de développement et sera bientôt disponible.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 13,
-              color: Color(0xFF64748B),
-            ),
-          ),
-          const SizedBox(height: 20),
-          TextButton.icon(
-            onPressed: () => _selectMenuIndex(0),
-            icon: const Icon(Icons.arrow_back, size: 18),
-            label: const Text('Retour au tableau de bord'),
-          ),
-        ],
-      ),
     );
   }
 
@@ -632,61 +608,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildQueueCard() {
+    final entries = QueueDirectory.all.take(5).toList();
+
     return _buildSectionCard(
       title: 'File d’attente',
       trailing: TextButton(
-        onPressed: () => _selectMenuIndex(4),
+        onPressed: () => _openModule(4),
         child: const Text('Voir tout'),
       ),
-      child: Column(
-        children: [
-          _buildQueueRow(
-            number: '01',
-            patient: 'Patient A',
-            doctor: 'Dr. Médecin',
-            status: 'En attente',
-          ),
-          _buildQueueRow(
-            number: '02',
-            patient: 'Patient B',
-            doctor: 'Dr. Médecin',
-            status: 'En consultation',
-          ),
-          _buildQueueRow(
-            number: '03',
-            patient: 'Patient C',
-            doctor: 'Dr. Médecin',
-            status: 'En attente',
-          ),
-          _buildQueueRow(
-            number: '04',
-            patient: 'Patient D',
-            doctor: 'Dr. Médecin',
-            status: 'Terminé',
-          ),
-        ],
-      ),
+      child: entries.isEmpty
+          ? const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Text(
+                'Aucun patient dans la file d’attente pour le moment.',
+                style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+              ),
+            )
+          : Column(
+              children: entries.map(_buildQueueRow).toList(),
+            ),
     );
   }
 
-  Widget _buildQueueRow({
-    required String number,
-    required String patient,
-    required String doctor,
-    required String status,
-  }) {
-    Color statusColor;
-
-    switch (status) {
-      case 'Terminé':
-        statusColor = AppTheme.secondaryColor;
-        break;
-      case 'En consultation':
-        statusColor = AppTheme.primaryColor;
-        break;
-      default:
-        statusColor = const Color(0xFFF59E0B);
-    }
+  Widget _buildQueueRow(PriseEnCharge entry) {
+    final color = statusColor(entry.statut);
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14),
@@ -708,7 +653,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             child: Center(
               child: Text(
-                number,
+                entry.numero,
                 style: const TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
@@ -725,7 +670,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  patient,
+                  '${entry.patient.nom} ${entry.patient.prenom}',
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     fontSize: 13,
@@ -733,7 +678,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  doctor,
+                  entry.service,
                   style: const TextStyle(
                     color: Color(0xFF94A3B8),
                     fontSize: 11,
@@ -749,13 +694,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
               vertical: 6,
             ),
             decoration: BoxDecoration(
-              color: statusColor.withValues(alpha: 0.10),
+              color: color.withValues(alpha: 0.10),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(
-              status,
+              entry.statut,
               style: TextStyle(
-                color: statusColor,
+                color: color,
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
               ),
@@ -775,25 +720,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
             icon: Icons.person_add_alt_1_outlined,
             title: 'Nouveau patient',
             subtitle: 'Créer un dossier patient',
-            onTap: _openPatients,
+            onTap: () => _openModule(1),
           ),
           _buildQuickAction(
             icon: Icons.search,
             title: 'Rechercher un patient',
             subtitle: 'Ouvrir un dossier existant',
-            onTap: _openPatients,
+            onTap: () => _openModule(1),
           ),
           _buildQuickAction(
             icon: Icons.queue_outlined,
             title: 'File d’attente',
             subtitle: 'Gérer les patients en attente',
-            onTap: () => _selectMenuIndex(4),
+            onTap: () => _openModule(4),
           ),
           _buildQuickAction(
             icon: Icons.medical_services_outlined,
             title: 'Soins infirmiers',
             subtitle: 'Voir les demandes de soins',
-            onTap: () => _selectMenuIndex(6),
+            onTap: () => _openModule(6),
           ),
         ],
       ),
